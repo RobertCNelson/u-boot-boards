@@ -31,6 +31,12 @@
 
 #include "spi_flash_internal.h"
 
+/* S25FLxx-specific commands */
+#define CMD_S25FLXX_SE		0xd8	/* Sector Erase */
+#define CMD_S25FLXX_BE		0xc7	/* Bulk Erase */
+#define CMD_S25FLXX_DP		0xb9	/* Deep Power-down */
+#define CMD_S25FLXX_RES		0xab	/* Release from DP, and Read Signature */
+
 struct spansion_spi_flash_params {
 	u16 idcode1;
 	u16 idcode2;
@@ -97,7 +103,7 @@ static const struct spansion_spi_flash_params spansion_spi_flash_table[] = {
 		.name = "S25FL129P_64K",
 	},
 	{
-		.idcode1 = 0x2019,
+		.idcode1 = 0x0219,
 		.idcode2 = 0x4d01,
 		.pages_per_sector = 256,
 		.nr_sectors = 512,
@@ -142,7 +148,15 @@ struct spi_flash *spi_flash_probe_spansion(struct spi_slave *spi, u8 *idcode)
 	flash->read = spi_flash_cmd_read_fast;
 	flash->page_size = 256;
 	flash->sector_size = 256 * params->pages_per_sector;
-	flash->size = flash->sector_size * params->nr_sectors;
+
+	/* address width is 4 for dual and 3 for single qspi */
+	if (flash->spi->is_dual == 1) {
+		flash->addr_width = 4;
+		flash->size = flash->sector_size * (2 * params->nr_sectors);
+	} else {
+		flash->addr_width = 3;
+		flash->size = flash->sector_size * params->nr_sectors;
+	}
 
 	return flash;
 }

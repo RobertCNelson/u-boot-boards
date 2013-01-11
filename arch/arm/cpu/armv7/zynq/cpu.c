@@ -21,10 +21,11 @@
  * MA 02111-1307 USA
  */
 #include <common.h>
+#include <linux/compiler.h>
 
-inline void lowlevel_init(void) {}
+__weak void lowlevel_init(void) {}
 
-void reset_cpu(ulong addr)
+__weak void reset_cpu(ulong addr)
 {
 	while (1)
 		;

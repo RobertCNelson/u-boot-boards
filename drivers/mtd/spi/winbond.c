@@ -67,6 +67,11 @@ static const struct winbond_spi_flash_params winbond_spi_flash_table[] = {
 		.nr_blocks		= 128,
 		.name			= "W25Q80",
 	},
+	{
+		.id			= 0x6017,
+		.nr_blocks		= 128,
+		.name			= "W25Q64DW",
+	},
 };
 
 struct spi_flash *spi_flash_probe_winbond(struct spi_slave *spi, u8 *idcode)
@@ -101,7 +106,15 @@ struct spi_flash *spi_flash_probe_winbond(struct spi_slave *spi, u8 *idcode)
 	flash->read = spi_flash_cmd_read_fast;
 	flash->page_size = 256;
 	flash->sector_size = 4096;
-	flash->size = 4096 * 16 * params->nr_blocks;
+
+	/* address width is 4 for dual and 3 for single qspi */
+	if (flash->spi->is_dual == 1) {
+		flash->addr_width = 4;
+		flash->size = 4096 * 16 * (2 * params->nr_blocks);
+	} else {
+		flash->addr_width = 3;
+		flash->size = 4096 * 16 * params->nr_blocks;
+	}
 
 	return flash;
 }
