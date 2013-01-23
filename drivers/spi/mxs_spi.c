@@ -167,8 +167,13 @@ static int mxs_spi_xfer_pio(struct mxs_spi_slave *slave,
 		mxs_spi_start_xfer(ssp_regs);
 
 	while (length--) {
+#if defined(CONFIG_MX23)
+		writel(SSP_CTRL0_XFER_COUNT_MASK, &ssp_regs->hw_ssp_ctrl0_clr);
+		writel(1, &ssp_regs->hw_ssp_ctrl0_set);
+#elif defined(CONFIG_MX28)
 		/* We transfer 1 byte */
 		writel(1, &ssp_regs->hw_ssp_xfer_size);
+#endif
 
 		if ((flags & SPI_XFER_END) && !length)
 			mxs_spi_end_xfer(ssp_regs);
