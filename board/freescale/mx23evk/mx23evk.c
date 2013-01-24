@@ -1,7 +1,13 @@
 /*
- * Olimex MX23 Olinuxino board
+ * Freescale MX23EVK board
  *
- * Copyright (C) 2013 Marek Vasut <marex@denx.de>
+ * (C) Copyright 2013 O.S. Systems Software LTDA.
+ *
+ * Author: Otavio Salvador <otavio@ossystems.com.br>
+ *
+ * Based on m28evk.c:
+ * Copyright (C) 2011 Marek Vasut <marek.vasut@gmail.com>
+ * on behalf of DENX Software Engineering GmbH
  *
  * See file CREDITS for list of people who contributed to this
  * project.
@@ -15,18 +21,13 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
- * MA 02111-1307 USA
  */
 
 #include <common.h>
-#include <asm/io.h>
-#include <asm/arch/iomux-mx23.h>
+#include <asm/gpio.h>
 #include <asm/arch/imx-regs.h>
 #include <asm/arch/clock.h>
+#include <asm/arch/iomux-mx23.h>
 #include <asm/arch/sys_proto.h>
 
 DECLARE_GLOBAL_DATA_PTR;
@@ -50,18 +51,6 @@ int dram_init(void)
 	return mxs_dram_init();
 }
 
-#ifdef	CONFIG_CMD_MMC
-static int mx23_olx_mmc_cd(int id)
-{
-	return 1;	/* Card always present */
-}
-
-int board_mmc_init(bd_t *bis)
-{
-	return mxsmmc_initialize(bis, 0, NULL, mx23_olx_mmc_cd);
-}
-#endif
-
 int board_init(void)
 {
 	/* Adress of boot parameters */
@@ -69,3 +58,26 @@ int board_init(void)
 
 	return 0;
 }
+
+#ifdef	CONFIG_CMD_MMC
+static int mx23evk_mmc_wp(int id)
+{
+	if (id != 0) {
+		printf("MXS MMC: Invalid card selected (card id = %d)\n", id);
+		return 1;
+	}
+
+	return gpio_get_value(MX23_PAD_PWM4__GPIO_1_30);
+}
+
+int board_mmc_init(bd_t *bis)
+{
+	/* Configure WP as input */
+	gpio_direction_input(MX23_PAD_PWM4__GPIO_1_30);
+
+	/* Configure MMC0 Power Enable */
+	gpio_direction_output(MX23_PAD_PWM3__GPIO_1_29, 0);
+
+	return mxsmmc_initialize(bis, 0, mx23evk_mmc_wp, NULL);
+}
+#endif

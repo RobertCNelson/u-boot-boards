@@ -1,7 +1,8 @@
 /*
- * Olimex MX23 Olinuxino Boot setup
+ * Freescale MX23EVK Boot setup
  *
- * Copyright (C) 2013 Marek Vasut <marex@denx.de>
+ * Copyright (C) 2011 Marek Vasut <marek.vasut@gmail.com>
+ * on behalf of DENX Software Engineering GmbH
  *
  * See file CREDITS for list of people who contributed to this
  * project.
@@ -15,11 +16,6 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
- * MA 02111-1307 USA
  */
 
 #include <common.h>
@@ -29,8 +25,8 @@
 #include <asm/arch/imx-regs.h>
 #include <asm/arch/sys_proto.h>
 
+#define	MUX_CONFIG_SSP1	(MXS_PAD_3V3 | MXS_PAD_8MA | MXS_PAD_PULLUP)
 #define	MUX_CONFIG_EMI	(MXS_PAD_3V3 | MXS_PAD_16MA | MXS_PAD_PULLUP)
-#define	MUX_CONFIG_SSP	(MXS_PAD_3V3 | MXS_PAD_8MA | MXS_PAD_PULLUP)
 
 const iomux_cfg_t iomux_setup[] = {
 	/* DUART */
@@ -85,12 +81,21 @@ const iomux_cfg_t iomux_setup[] = {
 	MX23_PAD_EMI_WEN__EMI_WEN | MUX_CONFIG_EMI,
 
 	/* MMC 0 */
-	MX23_PAD_SSP1_CMD__SSP1_CMD | MUX_CONFIG_SSP,
-	MX23_PAD_SSP1_DATA0__SSP1_DATA0 | MUX_CONFIG_SSP,
-	MX23_PAD_SSP1_DATA1__SSP1_DATA1 | MUX_CONFIG_SSP,
-	MX23_PAD_SSP1_DATA2__SSP1_DATA2 | MUX_CONFIG_SSP,
-	MX23_PAD_SSP1_DATA3__SSP1_DATA3 | MUX_CONFIG_SSP,
-	MX23_PAD_SSP1_SCK__SSP1_SCK | MUX_CONFIG_SSP,
+	MX23_PAD_SSP1_DATA0__SSP1_DATA0 | MUX_CONFIG_SSP1,
+	MX23_PAD_SSP1_DATA1__SSP1_DATA1 | MUX_CONFIG_SSP1,
+	MX23_PAD_SSP1_DATA2__SSP1_DATA2 | MUX_CONFIG_SSP1,
+	MX23_PAD_SSP1_DATA3__SSP1_DATA3 | MUX_CONFIG_SSP1,
+	MX23_PAD_SSP1_CMD__SSP1_CMD | MUX_CONFIG_SSP1,
+	MX23_PAD_SSP1_DETECT__SSP1_DETECT | MUX_CONFIG_SSP1,
+		(MXS_PAD_8MA | MXS_PAD_3V3 | MXS_PAD_NOPULL),
+	MX23_PAD_SSP1_SCK__SSP1_SCK |
+		(MXS_PAD_8MA | MXS_PAD_3V3 | MXS_PAD_NOPULL),
+	/* Write Protect Pin */
+	MX23_PAD_PWM4__GPIO_1_30 |
+		(MXS_PAD_4MA | MXS_PAD_3V3 | MXS_PAD_NOPULL),
+	/* Slot Power Enable */
+	MX23_PAD_PWM3__GPIO_1_29 |
+		(MXS_PAD_4MA | MXS_PAD_3V3 | MXS_PAD_NOPULL),
 };
 
 void board_init_ll(void)

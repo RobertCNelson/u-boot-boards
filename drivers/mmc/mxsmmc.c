@@ -49,11 +49,28 @@ struct mxsmmc_priv {
 	struct mxs_ssp_regs	*regs;
 	uint32_t		buswidth;
 	int			(*mmc_is_wp)(int);
+	int			(*mmc_cd)(int);
 	struct mxs_dma_desc	*desc;
 };
 
+#if defined(CONFIG_MX23)
+static const unsigned int mxsmmc_id_offset = 1;
+#elif defined(CONFIG_MX28)
+static const unsigned int mxsmmc_id_offset = 0;
+#endif
+
 #define	MXSMMC_MAX_TIMEOUT	10000
 #define MXSMMC_SMALL_TRANSFER	512
+
+static int mxsmmc_cd(struct mxsmmc_priv *priv)
+{
+	struct mxs_ssp_regs *ssp_regs = priv->regs;
+
+	if (priv->mmc_cd)
+		return priv->mmc_cd(priv->id);
+
+	return !(readl(&ssp_regs->hw_ssp_status) & SSP_STATUS_CARD_DETECT);
+}
 
 static int mxsmmc_send_cmd_pio(struct mxsmmc_priv *priv, struct mmc_data *data)
 {
@@ -120,7 +137,7 @@ static int mxsmmc_send_cmd_dma(struct mxsmmc_priv *priv, struct mmc_data *data)
 	priv->desc->cmd.data |= MXS_DMA_DESC_IRQ | MXS_DMA_DESC_DEC_SEM |
 				(data_count << MXS_DMA_DESC_BYTES_OFFSET);
 
-	dmach = MXS_DMA_CHANNEL_AHB_APBH_SSP0 + priv->id;
+	dmach = MXS_DMA_CHANNEL_AHB_APBH_SSP0 + priv->id + mxsmmc_id_offset;
 	mxs_dma_desc_append(dmach, priv->desc);
 	if (mxs_dma_go(dmach)) {
 		bounce_buffer_stop(&bbstate);
@@ -166,7 +183,7 @@ mxsmmc_send_cmd(struct mmc *mmc, struct mmc_cmd *cmd, struct mmc_data *data)
 	}
 
 	/* See if card is present */
-	if (readl(&ssp_regs->hw_ssp_status) & SSP_STATUS_CARD_DETECT) {
+	if (!mxsmmc_cd(priv)) {
 		printf("MMC%d: No card detected!\n", mmc->block_dev.dev);
 		return NO_CARD_ERR;
 	}
@@ -211,14 +228,25 @@ mxsmmc_send_cmd(struct mmc *mmc, struct mmc_cmd *cmd, struct mmc_data *data)
 		}
 
 		ctrl0 |= SSP_CTRL0_DATA_XFER;
+
+		reg = data->blocksize * data->blocks;
+#if defined(CONFIG_MX23)
+		ctrl0 |= reg & SSP_CTRL0_XFER_COUNT_MASK;
+
+		clrsetbits_le32(&ssp_regs->hw_ssp_cmd0,
+			SSP_CMD0_BLOCK_SIZE_MASK | SSP_CMD0_BLOCK_COUNT_MASK,
+			((data->blocks - 1) << SSP_CMD0_BLOCK_COUNT_OFFSET) |
+			((ffs(data->blocksize) - 1) <<
+				SSP_CMD0_BLOCK_SIZE_OFFSET));
+#elif defined(CONFIG_MX28)
+		writel(reg, &ssp_regs->hw_ssp_xfer_size);
+
 		reg = ((data->blocks - 1) <<
 			SSP_BLOCK_SIZE_BLOCK_COUNT_OFFSET) |
 			((ffs(data->blocksize) - 1) <<
 			SSP_BLOCK_SIZE_BLOCK_SIZE_OFFSET);
 		writel(reg, &ssp_regs->hw_ssp_block_size);
-
-		reg = data->blocksize * data->blocks;
-		writel(reg, &ssp_regs->hw_ssp_xfer_size);
+#endif
 	}
 
 	/* Kick off the command */
@@ -334,11 +362,17 @@ static int mxsmmc_init(struct mmc *mmc)
 	/* Reset SSP */
 	mxs_reset_block(&ssp_regs->hw_ssp_ctrl0_reg);
 
-	/* 8 bits word length in MMC mode */
-	clrsetbits_le32(&ssp_regs->hw_ssp_ctrl1,
-		SSP_CTRL1_SSP_MODE_MASK | SSP_CTRL1_WORD_LENGTH_MASK |
-		SSP_CTRL1_DMA_ENABLE,
-		SSP_CTRL1_SSP_MODE_SD_MMC | SSP_CTRL1_WORD_LENGTH_EIGHT_BITS);
+	/* Reconfigure the SSP block for MMC operation */
+	writel(SSP_CTRL1_SSP_MODE_SD_MMC |
+		SSP_CTRL1_WORD_LENGTH_EIGHT_BITS |
+		SSP_CTRL1_DMA_ENABLE |
+		SSP_CTRL1_POLARITY |
+		SSP_CTRL1_RECV_TIMEOUT_IRQ_EN |
+		SSP_CTRL1_DATA_CRC_IRQ_EN |
+		SSP_CTRL1_DATA_TIMEOUT_IRQ_EN |
+		SSP_CTRL1_RESP_TIMEOUT_IRQ_EN |
+		SSP_CTRL1_RESP_ERR_IRQ_EN,
+		&ssp_regs->hw_ssp_ctrl1_set);
 
 	/* Set initial bit clock 400 KHz */
 	mxs_set_ssp_busclock(priv->id, 400);
@@ -351,7 +385,7 @@ static int mxsmmc_init(struct mmc *mmc)
 	return 0;
 }
 
-int mxsmmc_initialize(bd_t *bis, int id, int (*wp)(int))
+int mxsmmc_initialize(bd_t *bis, int id, int (*wp)(int), int (*cd)(int))
 {
 	struct mmc *mmc = NULL;
 	struct mxsmmc_priv *priv = NULL;
@@ -384,11 +418,12 @@ int mxsmmc_initialize(bd_t *bis, int id, int (*wp)(int))
 		return -ENOMEM;
 	}
 
-	ret = mxs_dma_init_channel(id);
+	ret = mxs_dma_init_channel(id + mxsmmc_id_offset);
 	if (ret)
 		return ret;
 
 	priv->mmc_is_wp = wp;
+	priv->mmc_cd = cd;
 	priv->id = id;
 	priv->regs = mxs_ssp_regs_by_bus(id);
 
