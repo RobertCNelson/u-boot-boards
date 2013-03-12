@@ -469,7 +469,8 @@ static int macb_init(struct eth_device *netdev, bd_t *bd)
 #if	defined(CONFIG_AT91CAP9) || defined(CONFIG_AT91SAM9260) || \
 	defined(CONFIG_AT91SAM9263) || defined(CONFIG_AT91SAM9G20) || \
 	defined(CONFIG_AT91SAM9G45) || defined(CONFIG_AT91SAM9M10G45) || \
-	defined(CONFIG_AT91SAM9XE) || defined(CONFIG_AT91SAM9X5)
+	defined(CONFIG_AT91SAM9XE) || defined(CONFIG_AT91SAM9X5) || \
+	defined(CONFIG_SAMA5D3)
 	macb_writel(macb, USRIO, MACB_BIT(RMII) | MACB_BIT(CLKEN));
 #else
 	macb_writel(macb, USRIO, 0);
@@ -478,7 +479,8 @@ static int macb_init(struct eth_device *netdev, bd_t *bd)
 #if	defined(CONFIG_AT91CAP9) || defined(CONFIG_AT91SAM9260) || \
 	defined(CONFIG_AT91SAM9263) || defined(CONFIG_AT91SAM9G20) || \
 	defined(CONFIG_AT91SAM9G45) || defined(CONFIG_AT91SAM9M10G45) || \
-	defined(CONFIG_AT91SAM9XE) || defined(CONFIG_AT91SAM9X5)
+	defined(CONFIG_AT91SAM9XE) || defined(CONFIG_AT91SAM9X5) || \
+	defined(CONFIG_SAMA5D3)
 	macb_writel(macb, USRIO, MACB_BIT(CLKEN));
 #else
 	macb_writel(macb, USRIO, MACB_BIT(MII));
