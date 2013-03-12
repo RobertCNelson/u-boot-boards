@@ -3,6 +3,9 @@
  * Stelian Pop <stelian@popies.net>
  * Lead Tech Design <www.leadtechdesign.com>
  *
+ * (C) Copyright 2013
+ * Bo Shen <voice.shen@atmel.com>
+ *
  * See file CREDITS for list of people who contributed to this
  * project.
  *
@@ -22,19 +25,23 @@
  * MA 02111-1307 USA
  */
 
-#ifndef AT91_COMMON_H
-#define AT91_COMMON_H
+#include <common.h>
+#include <asm/io.h>
+#include <asm/arch/hardware.h>
+#include <asm/arch/at91_rstc.h>
 
-void at91_can_hw_init(void);
-void at91_lcd_hw_init(void);
-void at91_macb_hw_init(void);
-void at91_mci_hw_init(void);
-void at91_serial0_hw_init(void);
-void at91_serial1_hw_init(void);
-void at91_serial2_hw_init(void);
-void at91_seriald_hw_init(void);
-void at91_spi0_hw_init(unsigned long cs_mask);
-void at91_spi1_hw_init(unsigned long cs_mask);
-void at91_uhp_hw_init(void);
+/* Reset the cpu by telling the reset controller to do so */
+void reset_cpu(ulong ignored)
+{
+	at91_rstc_t *rstc = (at91_rstc_t *) ATMEL_BASE_RSTC;
 
-#endif /* AT91_COMMON_H */
+	writel(AT91_RSTC_KEY
+		| AT91_RSTC_CR_PROCRST	/* Processor Reset */
+		| AT91_RSTC_CR_PERRST	/* Peripheral Reset */
+#ifdef CONFIG_AT91RESET_EXTRST
+		| AT91_RSTC_CR_EXTRST	/* External Reset (assert nRST pin) */
+#endif
+		, &rstc->cr);
+	/* never reached */
+	do { } while (1);
+}
