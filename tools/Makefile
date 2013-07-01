@@ -80,7 +80,6 @@ BIN_FILES-y += proftool(SFX)
 EXT_OBJ_FILES-$(CONFIG_BUILD_ENVCRC) += common/env_embedded.o
 EXT_OBJ_FILES-y += common/image.o
 EXT_OBJ_FILES-$(CONFIG_FIT) += common/image-fit.o
-EXT_OBJ_FILES-y += common/image-sig.o
 EXT_OBJ_FILES-y += lib/crc32.o
 EXT_OBJ_FILES-y += lib/md5.o
 EXT_OBJ_FILES-y += lib/sha1.o
@@ -155,10 +154,6 @@ HOSTSRCS += $(addprefix $(SRCTREE)/lib/libfdt/,$(LIBFDT_OBJ_FILES-y:.o=.c))
 BINS	:= $(addprefix $(obj),$(sort $(BIN_FILES-y)))
 LIBFDT_OBJS	:= $(addprefix $(obj),$(LIBFDT_OBJ_FILES-y))
 
-# We cannot check CONFIG_FIT_SIGNATURE here since it is not set on the host
-FIT_SIG_OBJ_FILES	:= image-sig.o
-FIT_SIG_OBJS		:= $(addprefix $(obj),$(FIT_SIG_OBJ_FILES))
-
 HOSTOBJS := $(addprefix $(obj),$(OBJ_FILES-y))
 NOPEDOBJS := $(addprefix $(obj),$(NOPED_OBJ_FILES-y))
 
@@ -218,7 +213,6 @@ $(obj)mkimage$(SFX):	$(obj)aisimage.o \
 			$(obj)image-fit.o \
 			$(obj)image.o \
 			$(obj)image-host.o \
-			$(FIT_SIG_OBJS) \
 			$(obj)imximage.o \
 			$(obj)kwbimage.o \
 			$(obj)pblimage.o \
