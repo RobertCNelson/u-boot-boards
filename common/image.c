@@ -816,23 +816,20 @@ int boot_get_ramdisk(int argc, char * const argv[], bootm_headers_t *images,
 	ulong		default_addr;
 	int		rd_noffset;
 #endif
-	const char *select = NULL;
 
 	*rd_start = 0;
 	*rd_end = 0;
 
-	if (argc >= 2)
-		select = argv[1];
 	/*
 	 * Look for a '-' which indicates to ignore the
 	 * ramdisk argument
 	 */
-	if (select && strcmp(select, "-") ==  0) {
+	if ((argc >= 3) && (strcmp(argv[2], "-") ==  0)) {
 		debug("## Skipping init Ramdisk\n");
 		rd_len = rd_data = 0;
-	} else if (select || genimg_has_config(images)) {
+	} else if (argc >= 3 || genimg_has_config(images)) {
 #if defined(CONFIG_FIT)
-		if (select) {
+		if (argc >= 3) {
 			/*
 			 * If the init ramdisk comes from the FIT image and
 			 * the FIT image address is omitted in the command
@@ -844,12 +841,12 @@ int boot_get_ramdisk(int argc, char * const argv[], bootm_headers_t *images,
 			else
 				default_addr = load_addr;
 
-			if (fit_parse_conf(select, default_addr,
-					   &rd_addr, &fit_uname_config)) {
+			if (fit_parse_conf(argv[2], default_addr,
+						&rd_addr, &fit_uname_config)) {
 				debug("*  ramdisk: config '%s' from image at "
 						"0x%08lx\n",
 						fit_uname_config, rd_addr);
-			} else if (fit_parse_subimage(select, default_addr,
+			} else if (fit_parse_subimage(argv[2], default_addr,
 						&rd_addr, &fit_uname_ramdisk)) {
 				debug("*  ramdisk: subimage '%s' from image at "
 						"0x%08lx\n",
@@ -857,7 +854,7 @@ int boot_get_ramdisk(int argc, char * const argv[], bootm_headers_t *images,
 			} else
 #endif
 			{
-				rd_addr = simple_strtoul(select, NULL, 16);
+				rd_addr = simple_strtoul(argv[2], NULL, 16);
 				debug("*  ramdisk: cmdline image address = "
 						"0x%08lx\n",
 						rd_addr);
@@ -921,10 +918,7 @@ int boot_get_ramdisk(int argc, char * const argv[], bootm_headers_t *images,
 #endif
 		default:
 #ifdef CONFIG_SUPPORT_RAW_INITRD
-			end = NULL;
-			if (select)
-				end = strchr(select, ':');
-			if (end) {
+			if (argc >= 3 && (end = strchr(argv[2], ':'))) {
 				rd_len = simple_strtoul(++end, NULL, 16);
 				rd_data = rd_addr;
 			} else
