@@ -82,7 +82,11 @@ static inline int is_power_of_2(unsigned long n)
 /* vmt.c */
 #define device_register(...)		0
 #define volume_sysfs_init(...)		0
-#define volume_sysfs_close(...)		do { } while (0)
+#define volume_sysfs_close(_vol)	do {		\
+		if (_vol->dev.release) {		\
+			_vol->dev.release(&_vol->dev);	\
+		}					\
+	} while (0)
 
 /* kapi.c */
 

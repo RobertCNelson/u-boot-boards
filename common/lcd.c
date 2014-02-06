@@ -4,6 +4,8 @@
  * (C) Copyright 2001-2002
  * Wolfgang Denk, DENX Software Engineering -- wd@denx.de
  *
+ * Copyright (C) 2010-2011 Freescale Semiconductor, Inc.
+ *
  * See file CREDITS for list of people who contributed to this
  * project.
  *
@@ -53,6 +55,12 @@
 #include <atmel_lcdc.h>
 #endif
 
+#if defined(CONFIG_SPLASH_SCREEN) && defined(CONFIG_CCIMX5X)
+#include <partition.h>
+#include <nvram.h>
+#include <linux/mtd/compat.h>
+#endif
+
 /************************************************************************/
 /* ** FONT DATA								*/
 /************************************************************************/
@@ -70,6 +78,11 @@
 
 DECLARE_GLOBAL_DATA_PTR;
 
+#define COLOUR_TABLE_SIZE 0x400 /*colours * 4Byte */
+#define BMP_HEADER_SIZE 0x36
+
+#if defined(CONFIG_UBOOT_SPLASH) || !defined(CONFIG_CMD_BSP)
+
 ulong lcd_setmem (ulong addr);
 
 static void lcd_drawchars (ushort x, ushort y, uchar *str, int count);
@@ -86,6 +99,7 @@ static void lcd_setfgcolor (int color);
 static void lcd_setbgcolor (int color);
 
 char lcd_is_enabled = 0;
+extern int display_initialized;
 
 #ifdef	NOT_USED_SO_FAR
 static void lcd_getcolreg (ushort regno,
@@ -344,26 +358,40 @@ static void test_pattern (void)
 int drv_lcd_init (void)
 {
 	struct stdio_dev lcddev;
+	char *s;
+#ifdef CONFIG_USE_VIDEO_CONSOLE
 	int rc;
+#endif
+	if (!display_initialized)
+		return 1;
 
-	lcd_base = (void *)(gd->fb_base);
+	/* Initialize only if videoinit=yes */
+	s = getenv("videoinit");
+	if ((s != NULL) && !strcmp(s, "yes")) {
+		lcd_base = (void *)(gd->fb_base);
 
-	lcd_line_length = (panel_info.vl_col * NBITS (panel_info.vl_bpix)) / 8;
+		lcd_line_length = (panel_info.vl_col * NBITS (panel_info.vl_bpix)) / 8;
 
-	lcd_init (lcd_base);		/* LCD initialization */
+		lcd_init (lcd_base);		/* LCD initialization */
 
-	/* Device initialization */
-	memset (&lcddev, 0, sizeof (lcddev));
+		/* Device initialization */
+		memset (&lcddev, 0, sizeof (lcddev));
 
-	strcpy (lcddev.name, "lcd");
-	lcddev.ext   = 0;			/* No extensions */
-	lcddev.flags = DEV_FLAGS_OUTPUT;	/* Output only */
-	lcddev.putc  = lcd_putc;		/* 'putc' function */
-	lcddev.puts  = lcd_puts;		/* 'puts' function */
+#if defined( CONFIG_USE_VIDEO_CONSOLE )
+		strcpy (lcddev.name, "lcd");
+		lcddev.ext   = 0;			/* No extensions */
+		lcddev.flags = DEV_FLAGS_OUTPUT;	/* Output only */
+		lcddev.putc  = lcd_putc;		/* 'putc' function */
+		lcddev.puts  = lcd_puts;		/* 'puts' function */
 
-	rc = stdio_register (&lcddev);
+		rc = stdio_register (&lcddev);
 
-	return (rc == 0) ? 1 : rc;
+		return (rc == 0) ? 1 : rc;
+#else
+		return 1;
+#endif
+	}
+	return 1;
 }
 
 /*----------------------------------------------------------------------*/
@@ -402,9 +430,6 @@ static int lcd_clear (cmd_tbl_t * cmdtp, int flag, int argc, char *argv[])
 		COLOR_MASK(lcd_getbgcolor()),
 		lcd_line_length*panel_info.vl_row);
 #endif
-	/* Paint the logo and retrieve LCD base address */
-	debug ("[LCD] Drawing the logo...\n");
-	lcd_console_address = lcd_logo ();
 
 	console_col = 0;
 	console_row = 0;
@@ -414,8 +439,8 @@ static int lcd_clear (cmd_tbl_t * cmdtp, int flag, int argc, char *argv[])
 
 U_BOOT_CMD(
 	cls,	1,	1,	lcd_clear,
-	"clear screen",
-	""
+	"cls     - clear lcd / monitor",
+	"     - clear lcd / monitor"
 );
 
 /*----------------------------------------------------------------------*/
@@ -428,6 +453,13 @@ static int lcd_init (void *lcdbase)
 	lcd_ctrl_init (lcdbase);
 	lcd_is_enabled = 1;
 	lcd_clear (NULL, 1, 1, NULL);	/* dummy args */
+
+	/* Paint the logo and retrieve LCD base address */
+	debug ("[LCD] Drawing the logo...\n");
+	lcd_console_address = lcd_logo ();
+	if(lcd_console_address == NULL)
+		return 0;
+
 	lcd_enable ();
 
 	/* Initialize the console */
@@ -465,8 +497,19 @@ ulong lcd_setmem (ulong addr)
 	/* Round up to nearest full page */
 	size = (size + (PAGE_SIZE - 1)) & ~(PAGE_SIZE - 1);
 
+#if 1
+	if (addr == 0) {
+		/* default location is at the end of ram */
+		addr = gd->bd->bi_dram[0].start + gd->bd->bi_dram[0].size - size;
+	}
+	else {
+		addr -= size;
+	}
+	memset((void*)addr, 0, size);
+#else
 	/* Allocate pages for the frame buffer. */
 	addr -= size;
+#endif
 
 	debug ("Reserving %ldk for LCD Framebuffer at: %08lx\n", size>>10, addr);
 
@@ -477,7 +520,7 @@ ulong lcd_setmem (ulong addr)
 
 static void lcd_setfgcolor (int color)
 {
-#ifdef CONFIG_ATMEL_LCD
+#if defined(CONFIG_ATMEL_LCD) || defined(CONFIG_MXC2_LCD)
 	lcd_color_fg = color;
 #else
 	lcd_color_fg = color & 0x0F;
@@ -488,7 +531,7 @@ static void lcd_setfgcolor (int color)
 
 static void lcd_setbgcolor (int color)
 {
-#ifdef CONFIG_ATMEL_LCD
+#if defined(CONFIG_ATMEL_LCD) || defined(CONFIG_MXC2_LCD) || defined(CONFIG_VIDEO_MX5)
 	lcd_color_bg = color;
 #else
 	lcd_color_bg = color & 0x0F;
@@ -604,6 +647,23 @@ void bitmap_plot (int x, int y)
 
 /*----------------------------------------------------------------------*/
 #if defined(CONFIG_CMD_BMP) || defined(CONFIG_SPLASH_SCREEN)
+
+#if defined(CONFIG_CCIMX5X)
+
+static int digi_bsp_splash_load(void *memaddr, size_t size)
+{
+	const nv_param_part_t *part_entry;
+
+	if(!NvParamPartFind(&part_entry, NVPT_SPLASH_SCREEN, NVFS_NONE, 0, 0)) {
+		printf("No splash partition found\n");
+		gd->bd->fb_base = 0xffffffff;
+		return 0;
+	}
+
+	return PartRead(part_entry, memaddr, size, 1);
+}
+#endif /* CONFIG_CCIMX5X */
+
 /*
  * Display the BMP file located at address bmp_image.
  * Only uncompressed.
@@ -620,7 +680,11 @@ int lcd_display_bitmap(ulong bmp_image, int x, int y)
 #endif
 	ushort *cmap_base = NULL;
 	ushort i, j;
+#if defined(CONFIG_CCIMX5X)
+	uint16_t *fb;
+#else
 	uchar *fb;
+#endif
 	bmp_image_t *bmp=(bmp_image_t *)bmp_image;
 	uchar *bmap;
 	ushort padded_line;
@@ -638,7 +702,7 @@ int lcd_display_bitmap(ulong bmp_image, int x, int y)
 	if (!((bmp->header.signature[0]=='B') &&
 		(bmp->header.signature[1]=='M'))) {
 		printf ("Error: no valid bmp image at %lx\n", bmp_image);
-		return 1;
+		goto error;
 	}
 
 	width = le32_to_cpu (bmp->header.width);
@@ -649,19 +713,38 @@ int lcd_display_bitmap(ulong bmp_image, int x, int y)
 
 	bpix = NBITS(panel_info.vl_bpix);
 
-	if ((bpix != 1) && (bpix != 8) && (bpix != 16)) {
+	if ((bpix != 1) && (bpix != 8) && (bpix != 16) && (bpix != 24)) {
 		printf ("Error: %d bit/pixel mode, but BMP has %d bit/pixel\n",
 			bpix, bmp_bpix);
-		return 1;
+		goto error;
 	}
 
+#if defined(CONFIG_CCIMX5X)
+	if (bpix != 2 * le16_to_cpu(bmp->header.bit_count)) {
+		printf("Error: Expected 8 bit/pixel mode, but BMP has %d bit/pixel\n",
+		       le16_to_cpu(bmp->header.bit_count));
+		goto error;
+	}
+	if (height != panel_info.vl_row || width != panel_info.vl_col) {
+		printf("Error: BMP resolution is wrong. %d x %d but expected is %d x %d\n",
+		       (uint)width, (uint)height, panel_info.vl_col, panel_info.vl_row);
+		goto error;
+	}
+#else
+#if defined(CONFIG_BMP_24BPP)
+	/* We support displaying 24bpp BMPs on 16bpp LCDs */
+	if (bpix != bmp_bpix && (bmp_bpix != 24 || bpix != 16) &&
+		(bmp_bpix != 8 || bpix != 16)) {
+#else
 	/* We support displaying 8bpp BMPs on 16bpp LCDs */
 	if (bpix != bmp_bpix && (bmp_bpix != 8 || bpix != 16)) {
+#endif
 		printf ("Error: %d bit/pixel mode, but BMP has %d bit/pixel\n",
 			bpix,
 			le16_to_cpu(bmp->header.bit_count));
-		return 1;
+		goto error;
 	}
+#endif
 
 	debug ("Display-bmp: %d x %d  with %d colors\n",
 		(int)width, (int)height, (int)colors);
@@ -676,7 +759,6 @@ int lcd_display_bitmap(ulong bmp_image, int x, int y)
 #elif !defined(CONFIG_ATMEL_LCD)
 		cmap = panel_info.cmap;
 #endif
-
 		cmap_base = cmap;
 
 		/* Set color map */
@@ -705,12 +787,12 @@ int lcd_display_bitmap(ulong bmp_image, int x, int y)
 #endif
 
 	/*
-	 *  BMP format for Monochrome assumes that the state of a
+	 * BMP format for Monochrome assumes that the state of a
 	 * pixel is described on a per Bit basis, not per Byte.
-	 *  So, in case of Monochrome BMP we should align widths
+	 * So, in case of Monochrome BMP we should align widths
 	 * on a byte boundary and convert them from Bit to Byte
 	 * units.
-	 *  Probably, PXA250 and MPC823 process 1bpp BMP images in
+	 * Probably, PXA250 and MPC823 process 1bpp BMP images in
 	 * their own ways, so make the converting to be MCC200
 	 * specific.
 	 */
@@ -722,9 +804,7 @@ int lcd_display_bitmap(ulong bmp_image, int x, int y)
 		pwidth= ((pwidth + 7) & ~7) >> 3;
 	}
 #endif
-
 	padded_line = (width&0x3) ? ((width&~0x3)+4) : (width);
-
 #ifdef CONFIG_SPLASH_SCREEN_ALIGN
 	if (x == BMP_ALIGN_CENTER)
 		x = max(0, (pwidth - width) / 2);
@@ -743,8 +823,15 @@ int lcd_display_bitmap(ulong bmp_image, int x, int y)
 		height = panel_info.vl_row - y;
 
 	bmap = (uchar *)bmp + le32_to_cpu (bmp->header.data_offset);
+
+	/* For EDT display this line is not relevant.
+	 * The framebuffer pointer is not used */
+#if defined(CONFIG_CCIMX5X)
+	fb = (uint16_t *)(lcd_base + ((y + height - 1) * lcd_line_length + x));
+#else
 	fb   = (uchar *) (lcd_base +
-		(y + height - 1) * lcd_line_length + x);
+		(y + height - 1) * lcd_line_length + x * bpix / 8);
+#endif
 
 	switch (bmp_bpix) {
 	case 1: /* pass through */
@@ -758,7 +845,10 @@ int lcd_display_bitmap(ulong bmp_image, int x, int y)
 			WATCHDOG_RESET();
 			for (j = 0; j < width; j++) {
 				if (bpix != 16) {
-#if defined(CONFIG_PXA250) || defined(CONFIG_ATMEL_LCD)
+#if defined(CONFIG_CCIMX5X)
+					bmp_color_table_entry_t cte = bmp->color_table[*bmap++];
+					*fb++ = (( ((cte.red)   << 8) & 0xf800) | ( ((cte.green) << 3) & 0x07e0) | ( ((cte.blue) >> 3) & 0x001f) );
+#elif defined(CONFIG_PXA250) || defined(CONFIG_ATMEL_LCD)
 					*(fb++) = *(bmap++);
 #elif defined(CONFIG_MPC823) || defined(CONFIG_MCC200)
 					*(fb++) = 255 - *(bmap++);
@@ -768,8 +858,12 @@ int lcd_display_bitmap(ulong bmp_image, int x, int y)
 					fb += sizeof(uint16_t) / sizeof(*fb);
 				}
 			}
+#if defined(CONFIG_CCIMX5X)
+			fb -= lcd_line_length;
+#else
 			bmap += (width - padded_line);
 			fb   -= (byte_width + lcd_line_length);
+#endif
 		}
 		break;
 
@@ -794,27 +888,79 @@ int lcd_display_bitmap(ulong bmp_image, int x, int y)
 		}
 		break;
 #endif /* CONFIG_BMP_16BPP */
-
+#if defined(CONFIG_BMP_24BPP)
+	case 24:
+		if (bpix != 16) {
+			printf("Error: %d bit/pixel mode,"
+				"but BMP has %d bit/pixel\n",
+				bpix, bmp_bpix);
+			break;
+		}
+		for (i = 0; i < height; ++i) {
+			WATCHDOG_RESET();
+			for (j = 0; j < width; j++) {
+				*(uint16_t *)fb = ((*(bmap + 2) << 8) & 0xf800)
+						| ((*(bmap + 1) << 3) & 0x07e0)
+						| ((*(bmap) >> 3) & 0x001f);
+				bmap += 3;
+				fb += sizeof(uint16_t) / sizeof(*fb);
+			}
+			bmap += (width - padded_line);
+			fb   -= ((2*width) + lcd_line_length);
+		}
+		break;
+#endif /* CONFIG_BMP_24BPP */
 	default:
 		break;
 	};
 
 	return (0);
+error:
+	gd->bd->fb_base = 0xffffffff;
+	return 1;
 }
 #endif
 
+extern ulong calc_fbsize (void);
 static void *lcd_logo (void)
 {
 #ifdef CONFIG_SPLASH_SCREEN
-	char *s;
 	ulong addr;
 	static int do_splash = 1;
+	void *fb;
+	int ret;
+
+#if defined(CONFIG_CCIMX5X)
+	size_t tmp_fb_size = (calc_fbsize() / 2) + COLOUR_TABLE_SIZE + BMP_HEADER_SIZE;
+	fb = kmalloc(tmp_fb_size, GFP_KERNEL);
+	if(fb == NULL) {
+		kfree(fb);
+		printf("Not enough space for temporary framebuffer\n");
+		return NULL;
+	}
+	if (digi_bsp_splash_load(fb, tmp_fb_size)) {
+		addr = (ulong) fb;
+		do_splash = 0;
+
+		ret = lcd_display_bitmap (addr, 0, 0);
+		if(fb != NULL)
+			kfree(fb);
+	}
+#ifndef CONFIG_USE_VIDEO_CONSOLE
+	/* If splash failed and not using video, return NULL
+	 * so that the LCD is not enabled */
+	else
+		return NULL;
+#endif
+#else
+	char *s;
 
 	if (do_splash && (s = getenv("splashimage")) != NULL) {
 		int x = 0, y = 0;
 		do_splash = 0;
 
 		addr = simple_strtoul (s, NULL, 16);
+
 #ifdef CONFIG_SPLASH_SCREEN_ALIGN
 		if ((s = getenv ("splashpos")) != NULL) {
 			if (s[0] == 'm')
@@ -845,6 +991,7 @@ static void *lcd_logo (void)
 			return ((void *)lcd_base);
 		}
 	}
+#endif /* CONFIG_CCIMX5X */
 #endif /* CONFIG_SPLASH_SCREEN */
 
 #ifdef CONFIG_LCD_LOGO
@@ -864,5 +1011,6 @@ static void *lcd_logo (void)
 #endif /* CONFIG_LCD_LOGO && !CONFIG_LCD_INFO_BELOW_LOGO */
 }
 
+#endif /* defined(CONFIG_UBOOT_SPLASH) || !defined(CONFIG_CMD_BSP) */
 /************************************************************************/
 /************************************************************************/

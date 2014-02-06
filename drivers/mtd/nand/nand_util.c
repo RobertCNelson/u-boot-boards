@@ -596,8 +596,11 @@ int nand_read_skip_bad(nand_info_t *nand, loff_t offset, size_t *length,
 
 		rval = nand_read (nand, offset, &read_length, p_buffer);
 		if (rval && rval != -EUCLEAN) {
-			printf ("NAND read from offset %llx failed %d\n",
-				offset, rval);
+			/* don't print error if reading sector 0 */
+			if (0 != offset) {
+				printf ("NAND read from offset %llx failed %d\n",
+					offset, rval);
+			}
 			*length -= left_to_read;
 			return rval;
 		}

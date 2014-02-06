@@ -27,6 +27,10 @@
 #include <common.h>
 #include <command.h>
 
+#if defined(CONFIG_CCIMX51) || defined(CONFIG_CCIMX53)
+# include <asm/cache-cp15.h>
+#endif
+
 #if defined(CONFIG_CMD_CACHE)
 
 static int on_off (const char *);
@@ -66,7 +70,12 @@ int do_dcache ( cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 		default: cmd_usage(cmdtp);
 			return;
 #endif
+#if defined(CONFIG_ARCH_MMU)
+		case 0:
+			puts("MMU is on! data cache can not be disabled\n");
+#else
 		case 0:	dcache_disable();
+#endif
 			break;
 		case 1:	dcache_enable ();
 			break;

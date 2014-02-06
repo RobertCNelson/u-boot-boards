@@ -113,10 +113,14 @@ int do_bmp(cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 		addr = load_addr;
 		break;
 	case 3:		/* use argument */
-		addr = simple_strtoul(argv[2], NULL, 16);
+		addr = get_input(argv[2]);
+		if((long) addr == -1)
+			return 1;
 		break;
 	case 5:
-		addr = simple_strtoul(argv[2], NULL, 16);
+		addr = get_input(argv[2]);
+		if((long) addr == -1)
+			return 1;
 	        x = simple_strtoul(argv[3], NULL, 10);
 	        y = simple_strtoul(argv[4], NULL, 10);
 	        break;

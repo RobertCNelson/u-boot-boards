@@ -72,6 +72,8 @@ echo "BOARD  = $4" >> config.mk
 
 [ "$6" ] && [ "$6" != "NULL" ] && echo "SOC    = $6" >> config.mk
 
+echo "PLATFORM_NAME = ${PLATFORM_NAME}" >> config.mk
+
 #
 # Create board specific header file
 #

@@ -46,17 +46,16 @@ else
 HOSTCFLAGS += -pedantic
 endif
 
-ifeq ($(HOSTOS),cygwin)
-HOSTCFLAGS += -ansi
-endif
-
 #
 # toolchains targeting win32 generate .exe files
 #
+SFX =
 ifneq (,$(findstring WIN32 ,$(shell $(HOSTCC) -E -dM -xc /dev/null)))
 SFX = .exe
-else
-SFX =
+endif
+ifeq ($(HOSTOS),cygwin)
+SFX = .exe
+HOSTCFLAGS += -ansi
 endif
 
 #
@@ -66,8 +65,10 @@ endif
 include $(TOPDIR)/config.mk
 
 # Generated executable files
+ifneq ($(HOSTOS),cygwin)
 BIN_FILES-$(CONFIG_CMD_LOADS) += img2srec$(SFX)
 BIN_FILES-y += mkimage$(SFX)
+endif
 BIN_FILES-$(CONFIG_ENV_IS_EMBEDDED) += envcrc$(SFX)
 BIN_FILES-$(CONFIG_ENV_IS_IN_DATAFLASH) += envcrc$(SFX)
 BIN_FILES-$(CONFIG_ENV_IS_IN_EEPROM) += envcrc$(SFX)
@@ -91,8 +92,10 @@ EXT_OBJ_FILES-y += lib_generic/sha1.o
 EXT_OBJ_FILES-y += common/image.o
 
 # Source files located in the tools directory
+ifneq ($(HOSTOS),cygwin)
 OBJ_FILES-$(CONFIG_CMD_LOADS) += img2srec.o
 OBJ_FILES-y += mkimage.o
+endif
 OBJ_FILES-$(CONFIG_ENV_IS_EMBEDDED) += envcrc.o
 OBJ_FILES-$(CONFIG_SHA1_CHECK_UB_IMG) += ubsha1.o
 OBJ_FILES-$(CONFIG_CMD_NET) += gen_eth_addr.o
@@ -150,6 +153,11 @@ CPPFLAGS   = -idirafter $(SRCTREE)/include \
 		-D__KERNEL_STRICT_NAMES
 CFLAGS     = $(HOSTCFLAGS) $(CPPFLAGS) -O
 
+ifneq ($(BOOT_MEDIA),)
+        BOOT_MEDIA_MACRO := BOOT_MEDIA_$(shell echo $(BOOT_MEDIA) | tr '[a-z]' '[A-Z]')
+        CPPFLAGS += -D$(BOOT_MEDIA_MACRO)
+endif
+
 # No -pedantic switch to avoid libfdt compilation warnings
 FIT_CFLAGS = -Wall $(CPPFLAGS) -O
 
@@ -166,6 +174,7 @@ $(obj)envcrc$(SFX):	$(obj)envcrc.o $(obj)crc32.o $(obj)env_embedded.o $(obj)sha1
 $(obj)ubsha1$(SFX):	$(obj)ubsha1.o $(obj)sha1.o $(obj)os_support.o
 	$(CC) $(CFLAGS) -o $@ $^
 
+ifneq ($(HOSTOS),cygwin)
 $(obj)img2srec$(SFX):	$(obj)img2srec.o
 	$(CC) $(CFLAGS) $(HOST_LDFLAGS) -o $@ $^
 	$(STRIP) $@
@@ -174,6 +183,7 @@ $(obj)mkimage$(SFX):	$(obj)mkimage.o $(obj)crc32.o $(obj)image.o $(obj)md5.o \
 			$(obj)sha1.o $(LIBFDT_OBJS) $(obj)os_support.o
 	$(CC) $(CFLAGS) $(HOST_LDFLAGS) -o $@ $^
 	$(STRIP) $@
+endif
 
 $(obj)ncb$(SFX):	$(obj)ncb.o
 	$(CC) $(CFLAGS) $(HOST_LDFLAGS) -o $@ $^

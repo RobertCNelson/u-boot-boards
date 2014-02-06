@@ -1,5 +1,5 @@
 /*
- * (C) Copyright 2001-2004
+ * (C) Copyright 2001-2010
  * Wolfgang Denk, DENX Software Engineering, wd@denx.de.
  *
  * See file CREDITS for list of people who contributed to this
@@ -20,13 +20,11 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
  * MA 02111-1307 USA
  */
-
 #include <common.h>
 #include <command.h>
 #include <net.h>
 #include <miiphy.h>
 
-#ifdef CONFIG_CMD_NET
 void eth_parse_enetaddr(const char *addr, uchar *enetaddr)
 {
 	char *end;
@@ -57,12 +55,27 @@ int eth_setenv_enetaddr(char *name, const uchar *enetaddr)
 int eth_getenv_enetaddr_by_index(int index, uchar *enetaddr)
 {
 	char enetvar[32];
+#if defined(CONFIG_CCIMX5X) && !defined(CONFIG_MXC_FEC)
+	/**
+	 * Use the second mac address for the external controller, even if the
+	 * internal FEC was not enabled
+	 */
+	strcpy(enetvar, "eth1addr");
+#else
 	sprintf(enetvar, index ? "eth%daddr" : "ethaddr", index);
+#endif
 	return eth_getenv_enetaddr(enetvar, enetaddr);
 }
-#endif
 
-#if defined(CONFIG_CMD_NET) && defined(CONFIG_NET_MULTI)
+#ifdef CONFIG_NET_MULTI
+
+static int eth_mac_skip(int index)
+{
+	char enetvar[15];
+	char *skip_state;
+	sprintf(enetvar, index ? "eth%dmacskip" : "ethmacskip", index);
+	return ((skip_state = getenv(enetvar)) != NULL);
+}
 
 /*
  * CPU and board-specific Ethernet initializations.  Aliased function
@@ -175,7 +188,8 @@ int eth_register(struct eth_device* dev)
 		}
 #endif
 	} else {
-		for (d=eth_devices; d->next!=eth_devices; d=d->next);
+		for (d = eth_devices; d->next != eth_devices; d = d->next)
+			;
 		d->next = dev;
 	}
 
@@ -197,10 +211,17 @@ int eth_initialize(bd_t *bis)
 #if defined(CONFIG_MII) || defined(CONFIG_CMD_MII)
 	miiphy_init();
 #endif
+#ifdef CONFIG_ETH_PRIME
+	/* Init first the CPU Ethernet interface (default)
+	 * so that it is assigned 'ethaddr' variable. */
+	cpu_eth_init(bis);
+	board_eth_init(bis);
+#else
 	/* Try board-specific initialization first.  If it fails or isn't
 	 * present, try the cpu-specific initialization */
 	if (board_eth_init(bis) < 0)
 		cpu_eth_init(bis);
+#endif
 
 #if defined(CONFIG_DB64360) || defined(CONFIG_CPCI750)
 	mv6436x_eth_initialize(bis);
@@ -242,6 +263,11 @@ int eth_initialize(bd_t *bis)
 				}
 
 				memcpy(dev->enetaddr, env_enetaddr, 6);
+			}
+			if (dev->write_hwaddr &&
+				!eth_mac_skip(eth_number) &&
+				is_valid_ether_addr(dev->enetaddr)) {
+				dev->write_hwaddr(dev);
 			}
 
 			eth_number++;
@@ -483,7 +509,6 @@ void eth_set_current(void)
 			eth_current = eth_current->next;
 		} while (old_current != eth_current);
 	}
-
 	setenv("ethact", eth_current->name);
 }
 #endif
@@ -492,7 +517,8 @@ char *eth_get_name (void)
 {
 	return (eth_current ? eth_current->name : "unknown");
 }
-#elif defined(CONFIG_CMD_NET) && !defined(CONFIG_NET_MULTI)
+
+#else /* !CONFIG_NET_MULTI */
 
 #warning Ethernet driver is deprecated.  Please update to use CONFIG_NET_MULTI
 
@@ -515,6 +541,9 @@ int eth_initialize(bd_t *bis)
 #endif
 #if defined(CONFIG_DRIVER_NS7520_ETHERNET)
 	ns7520_miiphy_initialize(bis);
+#endif
+#if defined(CONFIG_SMC911X)
+	smc911x_initialize(0, CONFIG_SMC911X_BASE);
 #endif
 	return 0;
 }

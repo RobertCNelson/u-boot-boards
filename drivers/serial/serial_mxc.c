@@ -1,6 +1,9 @@
 /*
  * (c) 2007 Sascha Hauer <s.hauer@pengutronix.de>
  *
+ * (C) Copyright 2009 Digi International Inc.
+ *       -Added multiport support (Pedro Perez de Heredia)
+ *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -18,40 +21,7 @@
  */
 
 #include <common.h>
-#ifdef CONFIG_MX31
-#include <asm/arch/mx31.h>
-#else
-#include <asm/arch/imx-regs.h>
-#include <asm/arch/clock.h>
-#endif
-
-#define __REG(x)     (*((volatile u32 *)(x)))
-
-#ifdef CONFIG_SYS_MX31_UART1
-#define UART_PHYS 0x43f90000
-#elif defined(CONFIG_SYS_MX31_UART2)
-#define UART_PHYS 0x43f94000
-#elif defined(CONFIG_SYS_MX31_UART3)
-#define UART_PHYS 0x5000c000
-#elif defined(CONFIG_SYS_MX31_UART4)
-#define UART_PHYS 0x43fb0000
-#elif defined(CONFIG_SYS_MX31_UART5)
-#define UART_PHYS 0x43fb4000
-#elif defined(CONFIG_SYS_MX27_UART1)
-#define UART_PHYS 0x1000a000
-#elif defined(CONFIG_SYS_MX27_UART2)
-#define UART_PHYS 0x1000b000
-#elif defined(CONFIG_SYS_MX27_UART3)
-#define UART_PHYS 0x1000c000
-#elif defined(CONFIG_SYS_MX27_UART4)
-#define UART_PHYS 0x1000d000
-#elif defined(CONFIG_SYS_MX27_UART5)
-#define UART_PHYS 0x1001b000
-#elif defined(CONFIG_SYS_MX27_UART6)
-#define UART_PHYS 0x1001c000
-#else
-#error "define CONFIG_SYS_MX31_UARTx to use the mx31 UART driver"
-#endif
+#include <serial.h>
 
 /* Register definitions */
 #define URXD  0x0  /* Receiver Register */
@@ -162,60 +132,86 @@
 #define  UTS_RXFULL	 (1<<3)	 /* RxFIFO full */
 #define  UTS_SOFTRST	 (1<<0)	 /* Software reset */
 
+static int port_in_use = -1;   /* -1 indicates not initialized yet */
+static uint32_t uart_addr = 0; /* active uart base address */
+
+extern void mxc_serial_gpios_init(int port);
+
+
 DECLARE_GLOBAL_DATA_PTR;
 
-void serial_setbrg (void)
+void mxc_serial_setbrg (void)
 {
-#ifdef CONFIG_MX31
-	u32 clk = mx31_get_ipg_clk();
-#else
-	u32 clk = imx_get_perclk1();
-#endif
+	u32 clk = mxc_get_clock(MXC_UART_CLK);
 
 	if (!gd->baudrate)
 		gd->baudrate = CONFIG_BAUDRATE;
 
-	__REG(UART_PHYS + UFCR) = 4 << 7; /* divide input clock by 2 */
-	__REG(UART_PHYS + UBIR) = 0xf;
-	__REG(UART_PHYS + UBMR) = clk / (2 * gd->baudrate);
+	__REG(uart_addr + UFCR) = 4 << 7; /* divide input clock by 2 */
+	__REG(uart_addr + UBIR) = 0xf;
+	__REG(uart_addr + UBMR) = clk / (2 * gd->baudrate);
 
 }
 
-int serial_getc (void)
+int mxc_serial_getc (void)
 {
-	while (__REG(UART_PHYS + UTS) & UTS_RXEMPTY);
-	return (__REG(UART_PHYS + URXD) & URXD_RX_DATA); /* mask out status from upper word */
+	while (__REG(uart_addr + UTS) & UTS_RXEMPTY);
+	return (__REG(uart_addr + URXD) & URXD_RX_DATA); /* mask out status from upper word */
 }
 
-void serial_putc (const char c)
+#ifdef DEBUG_SERIAL
+void debug_serial_regs(void)
 {
-	__REG(UART_PHYS + UTXD) = c;
+	printf("UCR1 = 0x%08x\n", __REG(uart_addr + UCR1));
+	printf("UCR2 = 0x%08x\n", __REG(uart_addr + UCR2));
+	printf("UCR3 = 0x%08x\n", __REG(uart_addr + UCR3));
+	printf("UCR4 = 0x%08x\n", __REG(uart_addr + UCR4));
+	printf("UFCR = 0x%08x\n", __REG(uart_addr + UFCR));
+	printf("USR1 = 0x%08x\n", __REG(uart_addr + USR1));
+	printf("USR2 = 0x%08x\n", __REG(uart_addr + USR2));
+	printf("UESC = 0x%08x\n", __REG(uart_addr + UESC));
+	printf("UTIM = 0x%08x\n", __REG(uart_addr + UTIM));
+	printf("UBIR = 0x%08x\n", __REG(uart_addr + UBIR));
+	printf("UBMR = 0x%08x\n", __REG(uart_addr + UBMR));
+	printf("UBRC = 0x%08x\n", __REG(uart_addr + UBRC));
+	printf("UTS  = 0x%08x\n", __REG(uart_addr + UTS));
+	printf("\n");
+}
+#endif
+
+void mxc_serial_putc (const char c)
+{
+	__REG(uart_addr + UTXD) = c;
 
 	/* wait for transmitter to be ready */
-	while(!(__REG(UART_PHYS + UTS) & UTS_TXEMPTY));
+	while(!(__REG(uart_addr + UTS) & UTS_TXEMPTY));
 
 	/* If \n, also do \r */
 	if (c == '\n')
-		serial_putc ('\r');
+		mxc_serial_putc ('\r');
 }
 
 /*
  * Test whether a character is in the RX buffer
  */
-int serial_tstc (void)
+int mxc_serial_tstc (void)
 {
 	/* If receive fifo is empty, return false */
-	if (__REG(UART_PHYS + UTS) & UTS_RXEMPTY)
+	if (__REG(uart_addr + UTS) & UTS_RXEMPTY)
 		return 0;
 	return 1;
 }
 
-void
-serial_puts (const char *s)
+void mxc_serial_puts (const char *s)
 {
 	while (*s) {
-		serial_putc (*s++);
+		mxc_serial_putc (*s++);
 	}
+}
+
+void mxc_serial_gpios_deinit(void)
+{
+	/* Set gpios as inputs? */
 }
 
 /*
@@ -223,25 +219,111 @@ serial_puts (const char *s)
  * are always 8 data bits, no parity, 1 stop bit, no start bits.
  *
  */
-int serial_init (void)
+int mxc_serial_init (void)
 {
-	__REG(UART_PHYS + UCR1) = 0x0;
-	__REG(UART_PHYS + UCR2) = 0x0;
+	/* Set base address for the selected port */
+	switch (port_in_use) {
+	case 0:         uart_addr = UART1_BASE_ADDR;    break;
+	case 1:         uart_addr = UART2_BASE_ADDR;    break;
+	case 2:         uart_addr = UART3_BASE_ADDR;    break;
+#ifdef CONFIG_MX53
+	case 3:         uart_addr = UART4_BASE_ADDR;    break;
+	case 4:         uart_addr = UART5_BASE_ADDR;    break;
+#endif
+	default:        return -1;
+	}
 
-	while (!(__REG(UART_PHYS + UCR2) & UCR2_SRST));
+	mxc_serial_gpios_init(port_in_use);
 
-	__REG(UART_PHYS + UCR3) = 0x0704;
-	__REG(UART_PHYS + UCR4) = 0x8000;
-	__REG(UART_PHYS + UESC) = 0x002b;
-	__REG(UART_PHYS + UTIM) = 0x0;
+	__REG(uart_addr + UCR1) = 0x0;
+	__REG(uart_addr + UCR2) = 0x0;
 
-	__REG(UART_PHYS + UTS) = 0x0;
+	while (!(__REG(uart_addr + UCR2) & UCR2_SRST));
 
-	serial_setbrg();
+	__REG(uart_addr + UCR3) = 0x0704;
+	__REG(uart_addr + UCR4) = 0x8000;
+	__REG(uart_addr + UESC) = 0x002b;
+	__REG(uart_addr + UTIM) = 0x0;
 
-	__REG(UART_PHYS + UCR2) = UCR2_WS | UCR2_IRTS | UCR2_RXEN | UCR2_TXEN | UCR2_SRST;
+	__REG(uart_addr + UTS) = 0x0;
 
-	__REG(UART_PHYS + UCR1) = UCR1_UARTEN;
+	mxc_serial_setbrg();
+
+	__REG(uart_addr + UCR2) = UCR2_WS | UCR2_IRTS | UCR2_RXEN | UCR2_TXEN | UCR2_SRST;
+
+	__REG(uart_addr + UCR1) = UCR1_UARTEN;
 
 	return 0;
 }
+
+/*
+ * Unconfig gpios as special function and config to defaults.
+ */
+int mxc_serial_deinit(void)
+{
+	__REG(uart_addr + UCR1) = 0x0;
+	__REG(uart_addr + UCR2) = 0x0;
+
+	mxc_serial_gpios_deinit();
+
+	return 0;
+}
+
+
+/**
+ * serial_start - starts the console.
+ */
+static int mxc_serial_start(int port)
+{
+	int ret = -1;
+
+	if ((port >= 0 ) && (port < MXC_MAX_UARTS)) {
+		/* switch to new console */
+		if (port_in_use != -1)
+			mxc_serial_deinit();		/* not initialized yet */
+
+		port_in_use = port;
+		mxc_serial_init();
+		ret = 0;
+	} else
+		printf("*** ERROR: Unsupported port %d\n", port);
+
+	return ret;
+}
+
+
+/* some stuff to provide serial0...serial3 */
+#define SERIAL_PORT_START_FN(port) \
+static int mxc_serial_start_##port(void) \
+{ \
+       mxc_serial_start(port); \
+       return 0; \
+}
+SERIAL_PORT_START_FN(0)
+SERIAL_PORT_START_FN(1)
+SERIAL_PORT_START_FN(2)
+#ifdef CONFIG_MX53
+SERIAL_PORT_START_FN(3)
+SERIAL_PORT_START_FN(4)
+#endif
+
+#define DECLARE_SERIAL_PORT(port)                              \
+       {                                                       \
+               .name           = "serial"#port,                \
+               .init           = mxc_serial_start_##port,    \
+               .setbrg         = mxc_serial_setbrg,          \
+               .getc           = mxc_serial_getc,            \
+               .tstc           = mxc_serial_tstc,            \
+               .putc           = mxc_serial_putc,            \
+               .puts           = mxc_serial_puts,            \
+       }
+
+struct serial_device serial_mxc_devices[MXC_MAX_UARTS] = {
+       DECLARE_SERIAL_PORT(0),
+       DECLARE_SERIAL_PORT(1),
+       DECLARE_SERIAL_PORT(2),
+#ifdef CONFIG_MX53
+       DECLARE_SERIAL_PORT(3),
+       DECLARE_SERIAL_PORT(4)
+#endif
+};

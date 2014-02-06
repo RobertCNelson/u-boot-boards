@@ -4,7 +4,9 @@
  *
  * (C) Copyright 2001 Sysgo Real-Time Solutions, GmbH <www.elinos.com>
  * Andreas Heppel <aheppel@sysgo.de>
-
+ *
+ * Copyright (C) 2010-2011 Freescale Semiconductor, Inc.
+ *
  * See file CREDITS for list of people who contributed to this
  * project.
  *
@@ -57,12 +59,13 @@ DECLARE_GLOBAL_DATA_PTR;
     !defined(CONFIG_ENV_IS_IN_DATAFLASH)	&& \
     !defined(CONFIG_ENV_IS_IN_MG_DISK)	&& \
     !defined(CONFIG_ENV_IS_IN_NAND)	&& \
-    !defined(CONFIG_ENV_IS_IN_NVRAM)	&& \
+    !defined(CONFIG_ENV_IS_IN_DIGI_NVRAM)  && \
     !defined(CONFIG_ENV_IS_IN_ONENAND)	&& \
     !defined(CONFIG_ENV_IS_IN_SPI_FLASH)	&& \
+    !defined(CONFIG_ENV_IS_IN_MMC)	&& \
+    !defined(CONFIG_ENV_IS_IN_SATA)      && \
     !defined(CONFIG_ENV_IS_NOWHERE)
-# error Define one of CONFIG_ENV_IS_IN_{EEPROM|FLASH|DATAFLASH|ONENAND|\
-SPI_FLASH|MG_DISK|NVRAM|NOWHERE}
+# error Define one of CONFIG_ENV_IS_IN_{NVRAM|EEPROM|FLASH|DATAFLASH|ONENAND|SPI_FLASH|SATA|MMC|MG_DISK|NOWHERE}
 #endif
 
 #define XMK_STR(x)	#x
@@ -85,6 +88,8 @@ static const unsigned long baudrate_table[] = CONFIG_SYS_BAUDRATE_TABLE;
  * example in NetInitLoop()
  */
 static int env_id = 1;
+
+int isvalid_baudrate(int baudrate);
 
 int get_env_id (void)
 {
@@ -169,8 +174,12 @@ int do_printenv (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
  *
  * This function will ONLY work with a in-RAM copy of the environment
  */
-
+#if defined(CONFIG_ENV_OVERRIDE) && defined(CONFIG_ENV_IS_IN_DIGI_NVRAM)
+	extern int _do_setenv (int flag, int argc, char *argv[]);
+	int _do_orig_setenv (int flag, int argc, char *argv[])
+#else
 int _do_setenv (int flag, int argc, char *argv[])
+#endif
 {
 	int   i, len, oldval;
 	int   console = -1;
@@ -265,12 +274,8 @@ int _do_setenv (int flag, int argc, char *argv[])
 		 */
 		if (strcmp(argv[1],"baudrate") == 0) {
 			int baudrate = simple_strtoul(argv[2], NULL, 10);
-			int i;
-			for (i=0; i<N_BAUDRATES; ++i) {
-				if (baudrate == baudrate_table[i])
-					break;
-			}
-			if (i == N_BAUDRATES) {
+
+			if (!isvalid_baudrate(baudrate)) {
 				printf ("## Baudrate %d bps not supported\n",
 					baudrate);
 				return 1;
@@ -372,10 +377,14 @@ int _do_setenv (int flag, int argc, char *argv[])
 		bd->bi_ip_addr = htonl(addr);
 		return 0;
 	}
+#if defined(DIGI_BOARD)
 	if (strcmp(argv[1],"loadaddr") == 0) {
-		load_addr = simple_strtoul(argv[2], NULL, 16);
+		load_addr = get_input(argv[2]);
+		if((long) load_addr == -1)
+			return 1;
 		return 0;
 	}
+#endif
 #if defined(CONFIG_CMD_NET)
 	if (strcmp(argv[1],"bootfile") == 0) {
 		copy_filename (BootFile, argv[2], sizeof(BootFile));
@@ -556,7 +565,6 @@ int getenv_r (char *name, char *buf, unsigned len)
 }
 
 #if defined(CONFIG_CMD_SAVEENV) && !defined(CONFIG_ENV_IS_NOWHERE)
-
 int do_saveenv (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 {
 	extern char * env_name_spec;
@@ -592,6 +600,17 @@ int envmatch (uchar *s1, int i2)
 	if (*s1 == '\0' && env_get_char(i2-1) == '=')
 		return(i2);
 	return(-1);
+}
+
+int isvalid_baudrate(int baudrate)
+{
+	int i;
+
+	for (i=0; i<N_BAUDRATES; ++i) {
+		if (baudrate == baudrate_table[i])
+			return 1;
+	}
+	return 0;
 }
 
 

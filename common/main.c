@@ -40,9 +40,18 @@
 
 #include <post.h>
 
+#if defined(CONFIG_CMD_BSP) && defined(CONFIG_DIGI_CMD)
+#include "../common/digi/cmd_bsp.h"
+#endif
+
 #if defined(CONFIG_SILENT_CONSOLE) || defined(CONFIG_POST) || defined(CONFIG_CMDLINE_EDITING)
 DECLARE_GLOBAL_DATA_PTR;
 #endif
+
+/*
+ * Global for prompt
+ */
+char sys_prompt[CONFIG_PROMPT_MAXLEN];
 
 /*
  * Board-specific Platform code can reimplement show_boot_progress () if needed
@@ -338,6 +347,12 @@ void main_loop (void)
 	}
 #endif /* CONFIG_VERSION_VARIABLE */
 
+#ifdef CONFIG_SYS_PROMPT
+	/* Init prompt */
+	if (!strcmp(sys_prompt, ""))
+		strcpy(sys_prompt, CONFIG_SYS_PROMPT);
+#endif
+
 #ifdef CONFIG_SYS_HUSH_PARSER
 	u_boot_hush_start ();
 #endif
@@ -453,7 +468,21 @@ void main_loop (void)
 			reset_cmd_timeout();
 		}
 #endif
-		len = readline (CONFIG_SYS_PROMPT);
+#if defined(CONFIG_SILENT_CONSOLE) && defined(ENABLE_CONSOLE_GPIO)
+		if(gd->flags & GD_FLG_SILENT) {
+			/* waiting for signal to enable console */
+			if (gpio_enable_console()) {
+				extern int init_baudrate_from_env (void);
+
+				gd->flags &= ~(GD_FLG_SILENT);
+				serial_init();
+				init_baudrate_from_env();
+				console_assign (stdout, "serial");
+				console_assign (stderr, "serial");
+			}
+		}
+#endif
+		len = readline(sys_prompt);
 
 		flag = 0;	/* assume no special flags for now */
 		if (len > 0)
@@ -1229,9 +1258,12 @@ static void process_macros (const char *input, char *output)
 				}
 				envname[i] = 0;
 
-				/* Get its value */
+#if defined(CONFIG_CMD_BSP) && defined(CONFIG_DIGI_CMD)
+				/* GetEnvVar also returns static and dynamic variables */
+				envval = (char*) GetEnvVar( envname, 1 );
+#else
 				envval = getenv (envname);
-
+#endif
 				/* Copy into the line if it exists */
 				if (envval != NULL)
 					while ((*envval) && outputcnt) {

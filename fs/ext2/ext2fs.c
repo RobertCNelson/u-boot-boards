@@ -391,6 +391,8 @@ static int ext2fs_read_block (ext2fs_node_t node, int fileblock) {
 	return (blknr);
 }
 
+extern int LoadFileSilent;
+#define SHOW_DOT_ON_NTH_READING		32
 
 int ext2fs_read_file
 	(ext2fs_node_t node, int pos, unsigned int len, char *buf) {
@@ -399,12 +401,18 @@ int ext2fs_read_file
 	int log2blocksize = LOG2_EXT2_BLOCK_SIZE (node->data);
 	int blocksize = 1 << (log2blocksize + DISK_SECTOR_BITS);
 	unsigned int filesize = __le32_to_cpu(node->inode.size);
+	unsigned char print_dot_cntr;
 
 	/* Adjust len so it we can't read past the end of the file.  */
 	if (len > filesize) {
 		len = filesize;
 	}
 	blockcnt = ((len + pos) + blocksize - 1) / blocksize;
+
+	/* Enable printing dots to show read status */
+	/* Print only on each nth reading, as there are so much traffic */
+	print_dot_cntr = 0;
+	LoadFileSilent = 0;
 
 	for (i = pos / blocksize; i < blockcnt; i++) {
 		int blknr;
@@ -440,15 +448,28 @@ int ext2fs_read_file
 		if (blknr) {
 			int status;
 
+			if (print_dot_cntr >= SHOW_DOT_ON_NTH_READING) {
+				print_dot_cntr = 0;
+				LoadFileSilent = 0;
+			}
+			else
+				++print_dot_cntr;
+
 			status = ext2fs_devread (blknr, skipfirst, blockend, buf);
+
+			/* Disable printing dots */
+			LoadFileSilent = 1;
+
 			if (status == 0) {
 				return (-1);
 			}
 		} else {
 			memset (buf, 0, blocksize - skipfirst);
 		}
+
 		buf += blocksize - skipfirst;
 	}
+
 	return (len);
 }
 
@@ -481,18 +502,26 @@ static int ext2fs_iterate_dir (ext2fs_node_t dir, char *name, ext2fs_node_t * fn
 			return (0);
 		}
 		if (dirent.namelen != 0) {
-			char filename[dirent.namelen + 1];
+			char *filename;
 			ext2fs_node_t fdiro;
 			int type = FILETYPE_UNKNOWN;
+
+			filename = malloc(dirent.namelen + 1);
+			if (!filename)
+			{
+				return 0;
+			}
 
 			status = ext2fs_read_file (diro,
 						   fpos + sizeof (struct ext2_dirent),
 						   dirent.namelen, filename);
 			if (status < 1) {
+				free (filename);
 				return (0);
 			}
 			fdiro = malloc (sizeof (struct ext2fs_node));
 			if (!fdiro) {
+				free (filename);
 				return (0);
 			}
 
@@ -520,6 +549,7 @@ static int ext2fs_iterate_dir (ext2fs_node_t dir, char *name, ext2fs_node_t * fn
 							    &fdiro->inode);
 				if (status == 0) {
 					free (fdiro);
+					free (filename);
 					return (0);
 				}
 				fdiro->inode_read = 1;
@@ -546,6 +576,7 @@ static int ext2fs_iterate_dir (ext2fs_node_t dir, char *name, ext2fs_node_t * fn
 				if (strcmp (filename, name) == 0) {
 					*ftype = type;
 					*fnode = fdiro;
+					free (filename);
 					return (1);
 				}
 			} else {
@@ -555,6 +586,7 @@ static int ext2fs_iterate_dir (ext2fs_node_t dir, char *name, ext2fs_node_t * fn
 							    &fdiro->inode);
 					if (status == 0) {
 						free (fdiro);
+						free (filename);
 						return (0);
 					}
 					fdiro->inode_read = 1;
@@ -578,6 +610,7 @@ static int ext2fs_iterate_dir (ext2fs_node_t dir, char *name, ext2fs_node_t * fn
 					filename);
 			}
 			free (fdiro);
+			free (filename);
 		}
 		fpos += __le16_to_cpu (dirent.direntlen);
 	}

@@ -435,6 +435,8 @@ static int nand_default_block_markbad(struct mtd_info *mtd, loff_t ofs)
 		chip->ops.oobbuf = buf;
 		chip->ops.ooboffs = chip->badblockpos & ~0x01;
 
+		/* Align offset to start page of block */
+		ofs = block << chip->bbt_erase_shift;
 		ret = nand_do_write_oob(mtd, ofs, &chip->ops);
 		nand_release_device(mtd);
 	}
@@ -867,8 +869,8 @@ static int nand_wait(struct mtd_info *mtd, struct nand_chip *this)
 
 	while (1) {
 		if (get_timer(0) > timeo) {
-			printf("Timeout!");
-			return 0x01;
+			/*printf("Timeout!");*/
+			/*return 0x01;*/
 		}
 
 		if (this->dev_ready) {
@@ -1336,6 +1338,12 @@ static int nand_read(struct mtd_info *mtd, loff_t from, size_t len,
 	chip->ops.oobbuf = NULL;
 
 	ret = nand_do_read_ops(mtd, from, &chip->ops);
+	if(ret < 0) {
+		if (ret == -EUCLEAN ) {
+			printf("ECC correction\n");
+			ret = 0;
+		}
+	}
 
 	*retlen = chip->ops.retlen;
 
@@ -1863,7 +1871,14 @@ static int nand_do_write_ops(struct mtd_info *mtd, loff_t to,
 		return 0;
 
 	/* reject writes, which are not page aligned */
-	if (NOTALIGNED(to) || NOTALIGNED(ops->len)) {
+
+/*
+ * TODO:
+ * PPH revisit why we want to do aligned data writes/reads
+ * This doesnt work well with our mtd nvram stuff
+ */
+//	if (NOTALIGNED(to) || NOTALIGNED(ops->len)) {
+	if (NOTALIGNED(to)) {
 		printk(KERN_NOTICE "nand_write: "
 		       "Attempt to write not page aligned data\n");
 		return -EINVAL;
@@ -1914,7 +1929,6 @@ static int nand_do_write_ops(struct mtd_info *mtd, loff_t to,
 
 		if (unlikely(oob))
 			oob = nand_fill_oob(chip, oob, ops);
-
 		ret = chip->write_page(mtd, chip, wbuf, page, cached,
 				       (ops->mode == MTD_OOB_RAW));
 		if (ret)
@@ -1922,6 +1936,10 @@ static int nand_do_write_ops(struct mtd_info *mtd, loff_t to,
 
 		writelen -= bytes;
 		if (!writelen)
+			break;
+		/* Lets do anohter extra sanity check, needed because we allow
+		 * writting unaligned data */
+		if ((int)writelen < 0)
 			break;
 
 		column = 0;
@@ -2161,13 +2179,15 @@ static int nand_erase(struct mtd_info *mtd, struct erase_info *instr)
 int nand_erase_nand(struct mtd_info *mtd, struct erase_info *instr,
 		    int allowbbt)
 {
-	int page, len, status, pages_per_block, ret, chipnr;
+	int page, status, pages_per_block, ret, chipnr;
 	struct nand_chip *chip = mtd->priv;
-	int rewrite_bbt[CONFIG_SYS_NAND_MAX_CHIPS]={0};
+	loff_t rewrite_bbt[CONFIG_SYS_NAND_MAX_CHIPS] = {0};
 	unsigned int bbt_masked_page = 0xffffffff;
+	loff_t len;
 
-	MTDDEBUG (MTD_DEBUG_LEVEL3, "nand_erase: start = 0x%08x, len = %i\n",
-	          (unsigned int) instr->addr, (unsigned int) instr->len);
+	MTDDEBUG(MTD_DEBUG_LEVEL3, "nand_erase: start = 0x%012llx, "
+		 "len = %llu\n", (unsigned long long) instr->addr,
+		 (unsigned long long) instr->len);
 
 	/* Start address must align on block boundary */
 	if (instr->addr & ((1 << chip->phys_erase_shift) - 1)) {
@@ -2263,7 +2283,7 @@ int nand_erase_nand(struct mtd_info *mtd, struct erase_info *instr,
 			MTDDEBUG (MTD_DEBUG_LEVEL0, "nand_erase: "
 			          "Failed erase, page 0x%08x\n", page);
 			instr->state = MTD_ERASE_FAILED;
-			instr->fail_addr = (page << chip->page_shift);
+			instr->fail_addr = ((loff_t)page << chip->page_shift);
 			goto erase_exit;
 		}
 
@@ -2273,7 +2293,8 @@ int nand_erase_nand(struct mtd_info *mtd, struct erase_info *instr,
 		 */
 		if (bbt_masked_page != 0xffffffff &&
 		    (page & BBT_PAGE_MASK) == bbt_masked_page)
-			    rewrite_bbt[chipnr] = (page << chip->page_shift);
+			rewrite_bbt[chipnr] =
+				((loff_t)page << chip->page_shift);
 
 		/* Increment page address and decrement length */
 		len -= (1 << chip->phys_erase_shift);
@@ -2320,8 +2341,8 @@ int nand_erase_nand(struct mtd_info *mtd, struct erase_info *instr,
 			continue;
 		/* update the BBT for chip */
 		MTDDEBUG (MTD_DEBUG_LEVEL0, "nand_erase_nand: nand_update_bbt "
-		          "(%d:0x%0x 0x%0x)\n", chipnr, rewrite_bbt[chipnr],
-		          chip->bbt_td->pages[chipnr]);
+			  "(%d:0x%0llx 0x%0x)\n", chipnr, rewrite_bbt[chipnr],
+			  chip->bbt_td->pages[chipnr]);
 		nand_update_bbt(mtd, rewrite_bbt[chipnr]);
 	}
 
@@ -2516,7 +2537,7 @@ static struct nand_flash_dev *nand_get_flash_type(struct mtd_info *mtd,
 	if (!mtd->name)
 		mtd->name = type->name;
 
-	chip->chipsize = type->chipsize << 20;
+	chip->chipsize = (uint64_t)type->chipsize << 20;
 
 	/* Newer devices have all the information in additional id bytes */
 	if (!type->pagesize) {
@@ -2529,7 +2550,8 @@ static struct nand_flash_dev *nand_get_flash_type(struct mtd_info *mtd,
 		mtd->writesize = 1024 << (extid & 0x3);
 		extid >>= 2;
 		/* Calc oobsize */
-		mtd->oobsize = (8 << (extid & 0x01)) * (mtd->writesize >> 9);
+		mtd->oobsize = (*maf_id == 0x2c && dev_id == 0xd5) ?
+			218 : (8 << (extid & 0x01)) * (mtd->writesize >> 9);
 		extid >>= 2;
 		/* Calc blocksize. Blocksize is multiples of 64KiB */
 		mtd->erasesize = (64 * 1024) << (extid & 0x03);
@@ -2574,7 +2596,10 @@ static struct nand_flash_dev *nand_get_flash_type(struct mtd_info *mtd,
 
 	chip->bbt_erase_shift = chip->phys_erase_shift =
 		ffs(mtd->erasesize) - 1;
-	chip->chip_shift = ffs(chip->chipsize) - 1;
+	if (chip->chipsize & 0xffffffff)
+		chip->chip_shift = ffs(chip->chipsize) - 1;
+	else
+		chip->chip_shift = ffs((unsigned)(chip->chipsize >> 32)) + 31;
 
 	/* Set the bad block position */
 	chip->badblockpos = mtd->writesize > 512 ?
@@ -2866,10 +2891,9 @@ int nand_scan_tail(struct mtd_info *mtd)
 	mtd->ecclayout = chip->ecc.layout;
 
 	/* Check, if we should skip the bad block table scan */
-	if (chip->options & NAND_SKIP_BBTSCAN)
-		chip->options |= NAND_BBT_SCANNED;
+	chip->options |= NAND_BBT_SCANNED;
 
-	return 0;
+	return chip->scan_bbt(mtd);
 }
 
 /* module_text_address() isn't exported, and it's mostly a pointless

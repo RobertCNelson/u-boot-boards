@@ -55,6 +55,9 @@ export	HOSTARCH HOSTOS SHELL
 # Deal with colliding definitions from tcsh etc.
 VENDOR=
 
+# Freescale iMX family bootstream creator
+ELFTOSB := elftosb
+
 #########################################################################
 # Allow for silent builds
 ifeq (,$(findstring s,$(MAKEFLAGS)))
@@ -112,6 +115,7 @@ MKCONFIG	:= $(SRCTREE)/mkconfig
 export MKCONFIG
 
 ifneq ($(OBJTREE),$(SRCTREE))
+ELFTOSB += -p $(OBJTREE)
 REMOTE_BUILD	:= 1
 export REMOTE_BUILD
 endif
@@ -161,6 +165,12 @@ export	ARCH CPU BOARD VENDOR SOC
 # set default to nothing for native builds
 ifeq ($(HOSTARCH),$(ARCH))
 CROSS_COMPILE ?=
+endif
+
+ifeq ($(ARCH),arm)
+ifeq ($(HOSTOS),cygwin)
+CROSS_COMPILE=arm-elf-
+endif
 endif
 
 # load other configuration
@@ -223,6 +233,7 @@ LIBS += drivers/pci/libpci.a
 LIBS += drivers/pcmcia/libpcmcia.a
 LIBS += drivers/power/libpower.a
 LIBS += drivers/spi/libspi.a
+LIBS += drivers/fastboot/libfastboot.a
 ifeq ($(CPU),mpc83xx)
 LIBS += drivers/qe/qe.a
 endif
@@ -247,6 +258,10 @@ LIBS += common/libcommon.a
 LIBS += libfdt/libfdt.a
 LIBS += api/libapi.a
 LIBS += post/libpost.a
+ifdef DIGI_BOARD
+LIBS += common/digi/cmd_testhw/libtesthw.a
+LIBS += common/digi/libdigi.a
+endif
 
 LIBS := $(addprefix $(obj),$(LIBS))
 .PHONY : $(LIBS) $(TIMESTAMP_FILE) $(VERSION_FILE)
@@ -285,16 +300,40 @@ ONENAND_IPL = onenand_ipl
 U_BOOT_ONENAND = $(obj)u-boot-onenand.bin
 endif
 
+ifneq ($(strip $(PLATFORM_NAME)),)
+FINAL_UBOOT_NAME := $(obj)u-boot-$(PLATFORM_NAME).bin
+endif
+
 __OBJS := $(subst $(obj),,$(OBJS))
 __LIBS := $(subst $(obj),,$(LIBS)) $(subst $(obj),,$(LIBBOARD))
 
 #########################################################################
 #########################################################################
 
-# Always append ALL so that arch config.mk's can add custom ones
-ALL += $(obj)u-boot.srec $(obj)u-boot.bin $(obj)System.map $(U_BOOT_NAND) $(U_BOOT_ONENAND)
+ALL += $(obj)u-boot.srec $(obj)u-boot.bin $(FINAL_UBOOT_NAME) $(obj)System.map $(U_BOOT_NAND) $(U_BOOT_ONENAND)
+ifeq ($(ARCH),blackfin)
+ALL += $(obj)u-boot.ldr
+endif
+
+# Bootstreams for i.MX28 based platforms
+ifeq ($(CONFIG_BUILD_BOOTSTREAM),y)
+FINAL_UBOOT_NAME_SB := $(obj)u-boot-$(PLATFORM_NAME).sb
+FINAL_UBOOT_NAME_SBIVT := $(obj)u-boot-$(PLATFORM_NAME)-ivt.sb
+ALL += $(obj)u-boot.sb $(obj)u-boot-ivt.sb $(FINAL_UBOOT_NAME_SB) $(FINAL_UBOOT_NAME_SBIVT)
+# CONFIG_UBOOT_BOOTLETS_PATH is set by DEL when building u-boot under a DEL project (remove quotes with patsubst)
+BOOTLETS_DIR := $(realpath $(dir $(shell which arm-linux-gcc))/../imx-bootlets/$(CONFIG_BOOTLETS_PATH)$(patsubst "%",%,$(CONFIG_UBOOT_BOOTLETS_PATH)))
+endif
 
 all:		$(ALL)
+
+$(FINAL_UBOOT_NAME): $(obj)u-boot.bin
+	cp $< $@
+
+$(FINAL_UBOOT_NAME_SB): $(obj)u-boot.sb
+	cp $< $@
+
+$(FINAL_UBOOT_NAME_SBIVT): $(obj)u-boot-ivt.sb
+	cp $< $@
 
 $(obj)u-boot.hex:	$(obj)u-boot
 		$(OBJCOPY) ${OBJCFLAGS} -O ihex $< $@
@@ -327,6 +366,12 @@ $(obj)u-boot.sha1:	$(obj)u-boot.bin
 
 $(obj)u-boot.dis:	$(obj)u-boot
 		$(OBJDUMP) -d $< > $@
+
+$(obj)u-boot.sb:	$(obj)u-boot
+	$(ELFTOSB) -z -c $(BOOTLETS_DIR)/uboot.bd -p $(BOOTLETS_DIR) -o $@
+
+$(obj)u-boot-ivt.sb:	$(obj)u-boot
+	$(ELFTOSB) -z -f imx28 -c $(BOOTLETS_DIR)/uboot_ivt.bd -p $(BOOTLETS_DIR) -o $@
 
 GEN_UBOOT = \
 		UNDEF_SYM=`$(OBJDUMP) -x $(LIBBOARD) $(LIBS) | \
@@ -379,6 +424,7 @@ $(VERSION_FILE):
 		@( printf '#define U_BOOT_VERSION "U-Boot %s%s"\n' "$(U_BOOT_VERSION)" \
 		 '$(shell $(TOPDIR)/tools/setlocalversion $(TOPDIR))' ) > $@.tmp
 		@cmp -s $@ $@.tmp && rm -f $@.tmp || mv -f $@.tmp $@
+
 
 $(TIMESTAMP_FILE):
 		@date +'#define U_BOOT_DATE "%b %d %C%y"' > $@
@@ -480,6 +526,12 @@ dep tags ctags etags cscope $(obj)System.map:
 	@echo "System not configured - see README" >&2
 	@ exit 1
 endif	# config.mk
+
+# Set PLATFORM_NAME for Digi platforms at config stage (*_config rules)
+PLATFORM_NAME = $(patsubst %_config,%,$(filter %_config,$(MAKECMDGOALS)))
+ifneq ($(strip $(PLATFORM_NAME)),)
+export PLATFORM_NAME
+endif
 
 .PHONY : CHANGELOG
 CHANGELOG:
@@ -3204,6 +3256,65 @@ apollon_config		: unconfig
 	@$(MKCONFIG) $(@:_config=) arm arm1136 apollon NULL omap24xx
 	@echo "CONFIG_ONENAND_U_BOOT = y" >> $(obj)include/config.mk
 
+mx23_evk_config : unconfig
+	@$(MKCONFIG) $(@:_config=) arm arm926ejs mx23_evk freescale mx23
+
+mx25_3stack_mfg_config \
+mx25_3stack_config	:	unconfig
+	@$(MKCONFIG) $(@:_config=) arm arm926ejs mx25_3stack freescale mx25
+
+mx28_evk_config : unconfig
+	@$(MKCONFIG) $(@:_config=) arm arm926ejs mx28_evk freescale mx28
+	@echo "CONFIG_BUILD_BOOTSTREAM = y" >> $(obj)include/config.mk
+	@echo "CONFIG_BOOTLETS_PATH = mx28_evk" >> $(obj)include/config.mk
+
+cpx2_config \
+cpx2_128sdram_config \
+: unconfig
+	@if [ "$(findstring _128sdram_, $@)" ] ; then \
+		echo "#define CONFIG_CPX2_SDRAM_128MB" >> $(obj)include/config.h ; \
+		echo "Configuring for 128MB of SDRAM memory"; \
+	fi;
+	@$(MKCONFIG) -a cpx2 arm arm926ejs cpx2 freescale mx28
+	@echo "CONFIG_BUILD_BOOTSTREAM = y" >> $(obj)include/config.mk
+	@echo "CONFIG_BOOTLETS_PATH = cpx2" >> $(obj)include/config.mk
+
+wr21_config : unconfig
+	@$(MKCONFIG) -a wr21 arm arm926ejs wr21 freescale mx28
+	@echo "CONFIG_BUILD_BOOTSTREAM = y" >> $(obj)include/config.mk
+	@echo "CONFIG_BOOTLETS_PATH = wr21" >> $(obj)include/config.mk
+
+ccardimx28js_config \
+ccardimx28js_legacynames_config \
+ccardimx28js_261MHz_config \
+ccardimx28js_360MHz_config \
+ccardimx28js_test_config \
+ccardimx28js_dbg_config : unconfig
+	@mkdir -p $(obj)include
+	@if [ "$(findstring _dbg_, $@)" ] ; then \
+		echo "#define CONFIG_DOWNLOAD_BY_DEBUGGER" >> $(obj)include/config.h ; \
+		echo "Configuring for debugger download"; \
+	fi;
+	@if [ "$(findstring _test_, $@)" ] ; then \
+		echo "#define CONFIG_UBOOT_CMD_BSP_TESTHW" >> $(obj)include/config.h ; \
+		echo "Configuring with test commands embedded"; \
+	fi;
+	@if [ "$(findstring _legacynames_, $@)" ] ; then \
+		echo "#define CONFIG_LEGACY_PLATFORM_NAMES" >> $(obj)include/config.h ; \
+		echo "Configuring for legacy platform names"; \
+	fi;
+	@$(MKCONFIG) -a ccardimx28 arm arm926ejs ccardimx28 freescale mx28
+	@echo "CONFIG_BUILD_BOOTSTREAM = y" >> $(obj)include/config.mk
+# Bootlets path in del_toolchain repo. Yocto build system passes its own path
+# to the bootlets dir.
+	@if [ "$(findstring _261MHz_,$@)" ]; then \
+		echo "CONFIG_BOOTLETS_PATH = ccardimx28js/261MHz" >> $(obj)include/config.mk; \
+	elif [ "$(findstring _360MHz_,$@)" ]; then \
+		echo "CONFIG_BOOTLETS_PATH = ccardimx28js/360MHz" >> $(obj)include/config.mk; \
+	else \
+		echo "CONFIG_BOOTLETS_PATH = ccardimx28js" >> $(obj)include/config.mk; \
+	fi;
+
 imx31_litekit_config	: unconfig
 	@$(MKCONFIG) $(@:_config=) arm arm1136 imx31_litekit NULL mx31
 
@@ -3228,6 +3339,208 @@ mx31pdk_nand_config	: unconfig
 		echo "#define CONFIG_SKIP_RELOCATE_UBOOT" >> $(obj)include/config.h;	\
 	fi
 	@$(MKCONFIG) -a mx31pdk arm arm1136 mx31pdk freescale mx31
+
+mx31_3stack_config	: unconfig
+	@$(MKCONFIG) $(@:_config=) arm arm1136 mx31_3stack freescale mx31
+
+mx35_3stack_config      \
+mx35_3stack_mfg_config \
+mx35_3stack_mmc_config: unconfig
+	@$(MKCONFIG) $(@:_config=) arm arm1136 mx35_3stack freescale mx35
+
+mx50_arm2_lpddr2_config \
+mx50_arm2_ddr2_config \
+mx50_arm2_iram_config \
+mx50_arm2_config  \
+mx50_arm2_mfg_config \
+mx50_rdp_iram_config \
+mx50_rd3_config \
+mx50_rd3_mfg_config \
+mx50_rdp_mfg_config \
+mx50_rdp_android_config \
+mx50_rd3_android_config \
+mx50_rdp_config      : unconfig
+	@[ -z "$(findstring iram_,$@)" ] || \
+		{ echo "TEXT_BASE = 0xF8008400" >$(obj)board/freescale/mx50_rdp/config.tmp ; \
+		  echo "... with iram configuration" ; \
+		}
+	@$(MKCONFIG) $(@:_config=) arm arm_cortexa8 mx50_rdp freescale mx50
+
+mx51_bbg_android_config	\
+mx51_bbg_mfg_config \
+mx51_bbg_iram_config \
+mx51_bbg_config		: unconfig
+	@[ -z "$(findstring iram_,$@)" ] || \
+		{ echo "TEXT_BASE = 0x1FFE5000" >$(obj)board/freescale/mx51_bbg/config.tmp ; \
+		  echo "... with iram configuration" ; \
+		}
+	@$(MKCONFIG) $(@:_config=) arm arm_cortexa8 mx51_bbg freescale mx51
+
+mx51_3stack_android_config	\
+mx51_3stack_config	: unconfig
+	@$(MKCONFIG) $(@:_config=) arm arm_cortexa8 mx51_3stack freescale mx51
+
+ccimx51js_config \
+ccimx51js_legacynames_config \
+ccimx51js_128sdram_config \
+ccimx51js_128sdram_legacynames_config \
+ccimx51js_ext_eth_config \
+ccimx51js_128sdram_ext_eth_config \
+ccimx51js_test_config \
+ccimx51js_128sdram_test_config \
+ccimx51js_dbg_config \
+ccimx51js_128sdram_dbg_config \
+ccimx51js_128sdram_test_dbg_config \
+ccimx51js_test_dbg_config \
+ccimx51js_EAK_config \
+ccimx51js_db_pp_config \
+ccimx51js_db_pa_config \
+ccimx51js_db_rp_config \
+ccimx51js_db_ra_config \
+: unconfig
+	@mkdir -p $(obj)include
+	@if [ "$(findstring _dbg_, $@)" ] ; then \
+		echo "#define CONFIG_DOWNLOAD_BY_DEBUGGER" >> $(obj)include/config.h ; \
+		echo "Configuring for debugger download"; \
+	fi;
+	@if [ "$(findstring _test_, $@)" ] ; then \
+		echo "#define CONFIG_UBOOT_CMD_BSP_TESTHW" >> $(obj)include/config.h ; \
+		echo "Configuring with test commands embedded"; \
+	fi;
+	@if [ "$(findstring _ext_eth_, $@)" ] ; then \
+		echo "#define CONFIG_CCIMX5X_ENABLE_EXT_ETH" >> $(obj)include/config.h ; \
+		echo "Configuring for external ethernet controller"; \
+	fi;
+	@if [ "$(findstring _128sdram_, $@)" ] ; then \
+		echo "#define CONFIG_CCIMX5_SDRAM_128MB" >> $(obj)include/config.h ; \
+		echo "Configuring for 128MB of SDRAM memory"; \
+	fi;
+	@if [ "$(findstring _EAK_, $@)" ] ; then \
+		echo "#define CONFIG_JSCCIMX51_EAK" >> $(obj)include/config.h ; \
+		echo "Configuring for EAK development board"; \
+	fi;
+	@if [ "$(findstring _db_, $@)" ] ; then \
+		echo "#define CONFIG_DUAL_BOOT" >> $(obj)include/config.h ; \
+		echo "#define CONFIG_DUAL_BOOT_RETRIES 3" >> $(obj)include/config.h ; \
+		echo "#define CONFIG_DUAL_BOOT_WDT_ENABLE" >> $(obj)include/config.h ; \
+		echo "#define CONFIG_DUAL_BOOT_RETRY_FOREVER" >> $(obj)include/config.h ; \
+		echo "Configuring for Dual-Boot "; \
+	fi;
+	@if [ "$(findstring _db_pp, $@)" ] ; then \
+		echo "#define CONFIG_DUAL_BOOT_MODE_PEER" >> $(obj)include/config.h ; \
+		echo "#define CONFIG_DUAL_BOOT_STARTUP_GUARANTEE_PER_BOOT" >> $(obj)include/config.h ; \
+		echo "  Peer Mode, Guarantee per boot "; \
+	fi;
+	@if [ "$(findstring _db_pa, $@)" ] ; then \
+		echo "#define CONFIG_DUAL_BOOT_MODE_PEER" >> $(obj)include/config.h ; \
+		echo "#define CONFIG_DUAL_BOOT_STARTUP_GUARANTEE_AFTER_UPDATE" >> $(obj)include/config.h ; \
+		echo "  Peer Mode, Guarantee after update "; \
+	fi;
+	@if [ "$(findstring _db_rp, $@)" ] ; then \
+		echo "#define CONFIG_DUAL_BOOT_MODE_RESCUE" >> $(obj)include/config.h ; \
+		echo "#define CONFIG_DUAL_BOOT_STARTUP_GUARANTEE_PER_BOOT" >> $(obj)include/config.h ; \
+		echo "  Rescue Mode, Guarantee per boot "; \
+	fi;
+	@if [ "$(findstring _db_ra, $@)" ] ; then \
+		echo "#define CONFIG_DUAL_BOOT_MODE_RESCUE" >> $(obj)include/config.h ; \
+		echo "#define CONFIG_DUAL_BOOT_STARTUP_GUARANTEE_AFTER_UPDATE" >> $(obj)include/config.h ; \
+		echo "  Rescue Mode, Guarantee after update "; \
+	fi;
+	@if [ "$(findstring _legacynames_, $@)" ] ; then \
+		echo "#define CONFIG_LEGACY_PLATFORM_NAMES" >> $(obj)include/config.h ; \
+		echo "Configuring for legacy platform names"; \
+	fi;
+	@$(MKCONFIG) -a ccimx51 arm arm_cortexa8 ccimx51 freescale mx51
+
+ccimx53js_config \
+ccimx53js_legacynames_config \
+ccimx53js_128sdram_config \
+ccimx53js_128sdram_legacynames_config \
+ccimx53js_ext_eth_config \
+ccimx53js_test_config \
+ccimx53js_128sdram_test_config \
+ccimx53js_dbg_config \
+ccimx53js_128sdram_dbg_config \
+ccimx53js_test_dbg_config \
+ccimx53js_128sdram_test_dbg_config \
+ccimx53js_4Kpage_config \
+ccimx53js_db_pp_config \
+ccimx53js_db_pa_config \
+ccimx53js_db_rp_config \
+ccimx53js_db_ra_config \
+ : unconfig
+	@mkdir -p $(obj)include
+	@if [ "$(findstring _dbg_, $@)" ] ; then \
+		echo "#define CONFIG_DOWNLOAD_BY_DEBUGGER" >> $(obj)include/config.h ; \
+		echo "Configuring for debugger download"; \
+	fi;
+	@if [ "$(findstring _test_, $@)" ] ; then \
+		echo "#define CONFIG_UBOOT_CMD_BSP_TESTHW" >> $(obj)include/config.h ; \
+		echo "Configuring with test commands embedded"; \
+	fi;
+	@if [ "$(findstring _ext_eth_, $@)" ] ; then \
+		echo "#define CONFIG_CCIMX5X_ENABLE_EXT_ETH" >> $(obj)include/config.h ; \
+		echo "Configuring for external ethernet controller"; \
+	fi;
+	@if [ "$(findstring _128sdram_, $@)" ] ; then \
+		echo "#define CONFIG_CCIMX5_SDRAM_128MB" >> $(obj)include/config.h ; \
+		echo "Configuring for 128MB of SDRAM memory"; \
+	fi;
+	@if [ "$(findstring _4Kpage_, $@)" ] ; then \
+		echo "#define CONFIG_4KPAGE_NAND" >> $(obj)include/config.h ; \
+		echo "Configuring for 4K page NAND flash"; \
+	fi;
+	@if [ "$(findstring _db_, $@)" ] ; then \
+		echo "#define CONFIG_DUAL_BOOT" >> $(obj)include/config.h ; \
+		echo "#define CONFIG_DUAL_BOOT_RETRIES 3" >> $(obj)include/config.h ; \
+		echo "#define CONFIG_DUAL_BOOT_WDT_ENABLE" >> $(obj)include/config.h ; \
+		echo "#define CONFIG_DUAL_BOOT_RETRY_FOREVER" >> $(obj)include/config.h ; \
+		echo "Configuring for Dual-Boot "; \
+	fi;
+	@if [ "$(findstring _db_pp, $@)" ] ; then \
+		echo "#define CONFIG_DUAL_BOOT_MODE_PEER" >> $(obj)include/config.h ; \
+		echo "#define CONFIG_DUAL_BOOT_STARTUP_GUARANTEE_PER_BOOT" >> $(obj)include/config.h ; \
+		echo "  Peer Mode, Guarantee per boot "; \
+	fi;
+	@if [ "$(findstring _db_pa, $@)" ] ; then \
+		echo "#define CONFIG_DUAL_BOOT_MODE_PEER" >> $(obj)include/config.h ; \
+		echo "#define CONFIG_DUAL_BOOT_STARTUP_GUARANTEE_AFTER_UPDATE" >> $(obj)include/config.h ; \
+		echo "  Peer Mode, Guarantee after update "; \
+	fi;
+	@if [ "$(findstring _db_rp, $@)" ] ; then \
+		echo "#define CONFIG_DUAL_BOOT_MODE_RESCUE" >> $(obj)include/config.h ; \
+		echo "#define CONFIG_DUAL_BOOT_STARTUP_GUARANTEE_PER_BOOT" >> $(obj)include/config.h ; \
+		echo "  Rescue Mode, Guarantee per boot "; \
+	fi;
+	@if [ "$(findstring _db_ra, $@)" ] ; then \
+		echo "#define CONFIG_DUAL_BOOT_MODE_RESCUE" >> $(obj)include/config.h ; \
+		echo "#define CONFIG_DUAL_BOOT_STARTUP_GUARANTEE_AFTER_UPDATE" >> $(obj)include/config.h ; \
+		echo "  Rescue Mode, Guarantee after update "; \
+	fi;
+	@if [ "$(findstring _legacynames_, $@)" ] ; then \
+		echo "#define CONFIG_LEGACY_PLATFORM_NAMES" >> $(obj)include/config.h ; \
+		echo "Configuring for legacy platform names"; \
+	fi;
+	@$(MKCONFIG) -a ccimx53 arm arm_cortexa8 ccimx53 freescale mx53
+
+mx53_smd_mfg_config             \
+mx53_smd_android_config		\
+mx53_smd_config		:unconfig
+	$(MKCONFIG) $(@:_config=) arm arm_cortexa8 mx53_smd freescale mx53
+
+mx53_loco_mfg_config		\
+mx53_loco_config	:unconfig
+	$(MKCONFIG) $(@:_config=) arm arm_cortexa8 mx53_loco freescale mx53
+
+mx53_ard_ddr3_mfg_config	\
+mx53_ard_ddr3_config		\
+mx53_ard_mfg_config		\
+mx53_arm2_ddr3_config		\
+mx53_arm2_ddr3_android_config	\
+mx53_evk_android_config		\
+mx53_evk_mfg_config		\
+mx53_evk_config      : unconfig
+	@$(MKCONFIG) $(@:_config=) arm arm_cortexa8 mx53_evk freescale mx53
 
 omap2420h4_config	: unconfig
 	@$(MKCONFIG) $(@:_config=) arm arm1136 omap2420h4 NULL omap24xx

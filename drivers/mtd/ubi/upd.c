@@ -47,6 +47,10 @@
 #include <ubi_uboot.h>
 #include "ubi.h"
 
+#if CONFIG_CMD_BSP && defined(CONFIG_TFTP_UPDATE_ONTHEFLY)
+# include "../../../common/digi/cmd_bsp.h"
+#endif
+
 /**
  * set_update_marker - set update marker.
  * @ubi: UBI device description object
@@ -174,6 +178,34 @@ int ubi_start_update(struct ubi_device *ubi, struct ubi_volume *vol,
 }
 
 /**
+ * ubi_break_update - break UBI update
+ * @ubi: UBI device description object
+ * @vol: volume description object
+ *
+ * This function breaks the UBI update process, and frees the
+ * allocated memory.
+ * Returns zero in case of success and a negative error code
+ * in case of failure.
+ */
+# ifdef CONFIG_CMD_BSP
+int ubi_break_update(struct ubi_device *ubi, struct ubi_volume *vol)
+{
+	int err = 0;
+
+	if (vol->updating)
+	{
+		err = ubi_wl_flush(ubi);
+		if (err == 0) {
+			vol->updating = 0;
+			vfree(vol->upd_buf);
+		}
+	}
+
+	return err;
+}
+#endif /* CONFIG_CMD_BSP */
+
+/**
  * ubi_start_leb_change - start atomic LEB change.
  * @ubi: UBI device description object
  * @vol: volume description object
@@ -269,6 +301,15 @@ static int write_leb(struct ubi_device *ubi, struct ubi_volume *vol, int lnum,
 	return err;
 }
 
+#if CONFIG_CMD_BSP
+extern void PrintProgress(int iPercentage, int iThrottle, const char* szFmt, ...);
+
+# ifdef CONFIG_TFTP_UPDATE_ONTHEFLY
+extern char bTftpToFlashStatus;
+# endif /* CONFIG_TFTP_UPDATE_ONTHEFLY */
+
+#endif /* CONFIG_CMD_BSP */
+
 /**
  * ubi_more_update_data - write more update data.
  * @vol: volume description object
@@ -346,6 +387,14 @@ int ubi_more_update_data(struct ubi_device *ubi, struct ubi_volume *vol,
 	 * are starting from the beginning of an eraseblock.
 	 */
 	while (count) {
+#if CONFIG_CMD_BSP
+# ifdef CONFIG_TFTP_UPDATE_ONTHEFLY
+		if ( !(bTftpToFlashStatus & B_WRITE_IMG_TO_FLASH) )
+# endif /* CONFIG_TFTP_UPDATE_ONTHEFLY */
+		{
+			PrintProgress(lldiv((uint64_t)(to_write - count) * 100, to_write), 10, "Writing: ");
+		}
+#endif
 		if (count > vol->usable_leb_size)
 			len = vol->usable_leb_size;
 		else
@@ -368,6 +417,18 @@ int ubi_more_update_data(struct ubi_device *ubi, struct ubi_volume *vol,
 		lnum += 1;
 		buf += len;
 	}
+
+#if CONFIG_CMD_BSP
+# ifdef CONFIG_TFTP_UPDATE_ONTHEFLY
+	if ( !(bTftpToFlashStatus & B_WRITE_IMG_TO_FLASH) )
+# endif /* CONFIG_TFTP_UPDATE_ONTHEFLY */
+	{
+		if (!err) {
+			PrintProgress(100, 10, "Writing: ");
+		}
+		printf("\n");
+	}
+#endif
 
 	ubi_assert(vol->upd_received <= vol->upd_bytes);
 	if (vol->upd_received == vol->upd_bytes) {

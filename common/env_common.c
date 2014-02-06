@@ -30,6 +30,9 @@
 #include <linux/stddef.h>
 #include <malloc.h>
 
+#include "../digi/cmd_nvram/mtd.h"
+
+
 DECLARE_GLOBAL_DATA_PTR;
 
 #ifdef CONFIG_AMIGAONEG3SE
@@ -45,6 +48,7 @@ DECLARE_GLOBAL_DATA_PTR;
 #endif
 
 extern env_t *env_ptr;
+size_t nvram_part_size;
 
 extern void env_relocate_spec (void);
 extern uchar env_get_char_spec(int);
@@ -139,6 +143,12 @@ uchar default_environment[] = {
 	"\0"
 };
 
+#if defined(CONFIG_ENV_IS_IN_NAND)		/* Environment is in Nand Flash */ \
+	|| defined(CONFIG_ENV_IS_IN_SPI_FLASH) \
+	|| defined(CONFIG_ENV_IS_IN_MMC)
+int default_environment_size = sizeof(default_environment);
+#endif
+
 void env_crc_update (void)
 {
 	env_ptr->crc = crc32(0, env_ptr->data, ENV_SIZE);
@@ -226,6 +236,21 @@ void env_relocate (void)
 {
 	DEBUGF ("%s[%d] offset = 0x%lx\n", __FUNCTION__,__LINE__,
 		gd->reloc_off);
+
+#if defined(CONFIG_CMD_NAND) && defined(CONFIG_CMD_BSP)
+	/* Dynamic calculation of NVRAM partition size. */
+	nvram_part_size = MtdGetEraseSize(0, PART_UBOOT_SIZE);
+	while (nvram_part_size < CONFIG_ENV_SIZE)
+		nvram_part_size += MtdGetEraseSize(0, PART_UBOOT_SIZE + nvram_part_size);
+
+	/* space for NVRAM backup */
+	nvram_part_size += MtdGetEraseSize(0, PART_UBOOT_SIZE + nvram_part_size);
+	while (nvram_part_size < 2 * CONFIG_ENV_SIZE)
+		nvram_part_size += MtdGetEraseSize(0, PART_UBOOT_SIZE + nvram_part_size);
+
+	/* double NVRAM partition size to handle bad blcoks */
+	nvram_part_size += nvram_part_size;
+#endif
 
 #ifdef CONFIG_AMIGAONEG3SE
 	enable_nvram();

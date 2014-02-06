@@ -296,6 +296,11 @@ void fprintf(int file, const char *fmt, ...)
 int getc(void)
 {
 #ifdef CONFIG_DISABLE_CONSOLE
+#ifdef CONFIG_ENABLE_SILENT_RESCUE
+	if (gd->flags & GD_FLG_SILENT)
+		return 0;
+#endif
+
 	if (gd->flags & GD_FLG_DISABLE_CONSOLE)
 		return 0;
 #endif
@@ -311,7 +316,13 @@ int getc(void)
 
 int tstc(void)
 {
+
 #ifdef CONFIG_DISABLE_CONSOLE
+#ifdef CONFIG_ENABLE_SILENT_RESCUE
+	if (gd->flags & GD_FLG_SILENT)
+		return 0;
+#endif
+
 	if (gd->flags & GD_FLG_DISABLE_CONSOLE)
 		return 0;
 #endif
@@ -408,6 +419,7 @@ int ctrlc(void)
 		if (tstc()) {
 			switch (getc()) {
 			case 0x03:		/* ^C - Control C */
+				puts ("<INTERRUPT>\n");
 				ctrlc_was_pressed = 1;
 				return 1;
 			default:
@@ -525,6 +537,10 @@ int console_init_f(void)
 	gd->have_console = 1;
 
 #ifdef CONFIG_SILENT_CONSOLE
+#ifdef ENABLE_CONSOLE_GPIO
+	if(gpio_enable_console())
+		return 0;
+#endif
 	if (getenv("silent") != NULL)
 		gd->flags |= GD_FLG_SILENT;
 #endif
@@ -664,6 +680,32 @@ int console_init_r(void)
 	if (getenv("splashimage") != NULL)
 		gd->flags |= GD_FLG_SILENT;
 #endif
+
+#ifdef CONFIG_SILENT_CONSOLE
+	/* Suppress all output if "silent" mode requested */
+#ifdef CONFIG_ENABLE_SILENT_RESCUE
+	extern int display_banner (void);
+	extern int display_flash_config (void);
+	extern int display_dram_config (void);
+	extern int init_baudrate_from_env (void);
+
+	char *s;
+	s = getenv("silent");
+	if (((s == NULL) || (strcmp(s, "yes") != 0)) && gd->flags & GD_FLG_SILENT) {
+		gd->flags &= ~GD_FLG_SILENT;
+		serial_init();
+		init_baudrate_from_env();
+		display_banner();
+#ifndef CONFIG_SYS_NO_FLASH
+		display_flash_config();
+#endif
+		display_dram_config();
+	}
+#endif /* CONFIG_ENABLE_SILENT_RESCUE */
+
+	if (gd->flags & GD_FLG_SILENT)
+		outputdev = search_device (DEV_FLAGS_OUTPUT, "nulldev");
+#endif /* CONFIG_SILENT_CONSOLE */
 
 	/* Scan devices looking for input and output devices */
 	list_for_each(pos, list) {

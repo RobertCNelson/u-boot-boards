@@ -59,6 +59,14 @@ struct serial_device *__default_serial_console (void)
 #else
 		return &serial0_device;
 #endif
+#elif defined(CONFIG_CCIMX51) || defined(CONFIG_CCIMX53)
+	return &serial_mxc_devices[CONFIG_CONS_INDEX];
+#elif defined(CONFIG_MX28)
+# if defined (CONFIG_DEFAULT_SERIAL_AUART)
+	return &serial_mxs_auart_devices[CONFIG_CONS_INDEX];
+# else
+	return &serial_mxs_duart_device;
+#endif /* CONFIG_DEFAULT_SERIAL_AUART */
 #elif defined(CONFIG_S3C2410)
 #if defined(CONFIG_SERIAL1)
 	return &s3c24xx_serial0_device;
@@ -138,6 +146,20 @@ void serial_initialize (void)
 	serial_register(&s3c24xx_serial0_device);
 	serial_register(&s3c24xx_serial1_device);
 	serial_register(&s3c24xx_serial2_device);
+#endif
+
+#if defined(CONFIG_CCIMX51) || defined(CONFIG_CCIMX53)
+	int i;
+	for (i = 0; i < ARRAY_SIZE(serial_mxc_devices); i++)
+		serial_register(&serial_mxc_devices[i]);
+#endif
+#if defined(CONFIG_MX28)
+#if defined(CONFIG_WR21) || defined(CONFIG_CCARDIMX28)
+	int i;
+	for (i = 0; i < ARRAY_SIZE(serial_mxs_auart_devices); i++)
+		serial_register(&serial_mxs_auart_devices[i]);
+#endif
+	serial_register(&serial_mxs_duart_device);
 #endif
 	serial_assign (default_serial_console ()->name);
 }

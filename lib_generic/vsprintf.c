@@ -492,6 +492,9 @@ static char *pointer(const char *fmt, char *buf, void *ptr, int field_width, int
 int vsprintf(char *buf, const char *fmt, va_list args)
 {
 	unsigned NUM_TYPE num;
+#ifdef CONFIG_MX28
+	unsigned long hi, lo;
+#endif
 	int base;
 	char *str;
 
@@ -632,8 +635,14 @@ int vsprintf(char *buf, const char *fmt, va_list args)
 			continue;
 		}
 #ifdef CONFIG_SYS_64BIT_VSPRINTF
-		if (qualifier == 'L')  /* "quad" for 64 bit variables */
+		if (qualifier == 'L') { /* "quad" for 64 bit variables */
+#ifdef CONFIG_MX28
+			lo = va_arg(args, unsigned long);
+			hi = va_arg(args, unsigned long);
+#else
 			num = va_arg(args, unsigned long long);
+#endif
+		}
 		else
 #endif
 		if (qualifier == 'l') {
@@ -653,7 +662,19 @@ int vsprintf(char *buf, const char *fmt, va_list args)
 			if (flags & SIGN)
 				num = (signed int) num;
 		}
+#ifdef CONFIG_MX28
+		if (qualifier == 'L') {
+			field_width = -1;
+			flags &= ~ZEROPAD;
+			str = number(str, hi, base, field_width, precision, flags);
+			flags |= ZEROPAD;
+			field_width = 8;	/* always fill left zeros */
+			str = number(str, lo, base, field_width, precision, flags);
+		}
+		else
+#endif
 		str = number(str, num, base, field_width, precision, flags);
+
 	}
 	*str = '\0';
 	return str-buf;

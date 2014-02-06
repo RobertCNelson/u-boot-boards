@@ -120,6 +120,17 @@ typedef volatile unsigned char	vu_char;
 #define debugX(level,fmt,args...)
 #endif	/* DEBUG */
 
+/*
+ * Output a debug text when condition "cond" is met. The "cond" should be
+ * computed by a preprocessor in the best case, allowing for the best
+ * optimization.
+ */
+#define debug_cond(cond, fmt, args...)		\
+	do {					\
+		if (cond)			\
+			printf(fmt, ##args);	\
+	} while (0)
+
 #ifndef BUG
 #define BUG() do { \
 	printf("BUG: failure at %s:%d/%s()!\n", __FILE__, __LINE__, __FUNCTION__); \
@@ -166,6 +177,8 @@ typedef void (interrupt_handler_t)(void *);
 #endif
 
 #endif /* CONFIG_SERIAL_MULTI */
+
+#define CONFIG_PROMPT_MAXLEN		50
 
 /*
  * General Purpose Utilities
@@ -371,9 +384,14 @@ void  perform_soft_reset(void);
 /* $(BOARD)/$(BOARD).c */
 int board_early_init_f (void);
 int board_late_init (void);
+int board_before_mloop_init (void);	/* Last action before starting the main loop */
 int board_postclk_init (void); /* after clocks/timebase, before env/serial */
 int board_early_init_r (void);
 void board_poweroff (void);
+
+#ifdef CONFIG_SILENT_CONSOLE
+int gpio_enable_console (void);
+#endif
 
 #if defined(CONFIG_SYS_DRAM_TEST)
 int testdram(void);
@@ -595,7 +613,6 @@ void	flush_cache   (unsigned long, unsigned long);
 void	flush_dcache_range(unsigned long start, unsigned long stop);
 void	invalidate_dcache_range(unsigned long start, unsigned long stop);
 
-
 /* lib_$(ARCH)/ticks.S */
 unsigned long long get_ticks(void);
 void	wait_ticks    (unsigned long);
@@ -605,6 +622,9 @@ void	udelay	      (unsigned long);
 ulong	usec2ticks    (unsigned long usec);
 ulong	ticks2usec    (unsigned long ticks);
 int	init_timebase (void);
+
+/* common/helper.c */
+long get_input(const char *cp);
 
 /* lib_generic/vsprintf.c */
 ulong	simple_strtoul(const char *cp,char **endp,unsigned int base);
@@ -625,6 +645,9 @@ char *	strmhz(char *buf, long hz);
 uint32_t crc32 (uint32_t, const unsigned char *, uint);
 uint32_t crc32_wd (uint32_t, const unsigned char *, uint, uint);
 uint32_t crc32_no_comp (uint32_t, const unsigned char *, uint);
+
+/* lib_generic/string.c */
+int strnicmp(const char *s1, const char *s2, size_t len);
 
 /* common/console.c */
 int	console_init_f(void);	/* Before relocation; uses the serial  stuff	*/
@@ -696,6 +719,65 @@ int cpu_reset(int nr);
 int cpu_release(int nr, int argc, char *argv[]);
 #endif
 
+/*
+ * The ALLOC_CACHE_ALIGN_BUFFER macro is used to allocate a buffer on the
+ * stack that meets the minimum architecture alignment requirements for DMA.
+ * Such a buffer is useful for DMA operations where flushing and invalidating
+ * the cache before and after a read and/or write operation is required for
+ * correct operations.
+ *
+ * When called the macro creates an array on the stack that is sized such
+ * that:
+ *
+ * 1) The beginning of the array can be advanced enough to be aligned.
+ *
+ * 2) The size of the aligned portion of the array is a multiple of the minimum
+ *    architecture alignment required for DMA.
+ *
+ * 3) The aligned portion contains enough space for the original number of
+ *    elements requested.
+ *
+ * The macro then creates a pointer to the aligned portion of this array and
+ * assigns to the pointer the address of the first element in the aligned
+ * portion of the array.
+ *
+ * Calling the macro as:
+ *
+ *     ALLOC_CACHE_ALIGN_BUFFER(uint32_t, buffer, 1024);
+ *
+ * Will result in something similar to saying:
+ *
+ *     uint32_t    buffer[1024];
+ *
+ * The following differences exist:
+ *
+ * 1) The resulting buffer is guaranteed to be aligned to the value of
+ *    ARCH_DMA_MINALIGN.
+ *
+ * 2) The buffer variable created by the macro is a pointer to the specified
+ *    type, and NOT an array of the specified type.  This can be very important
+ *    if you want the address of the buffer, which you probably do, to pass it
+ *    to the DMA hardware.  The value of &buffer is different in the two cases.
+ *    In the macro case it will be the address of the pointer, not the address
+ *    of the space reserved for the buffer.  However, in the second case it
+ *    would be the address of the buffer.  So if you are replacing hard coded
+ *    stack buffers with this macro you need to make sure you remove the & from
+ *    the locations where you are taking the address of the buffer.
+ *
+ * Note that the size parameter is the number of array elements to allocate,
+ * not the number of bytes.
+ *
+ * This macro can not be used outside of function scope, or for the creation
+ * of a function scoped static buffer.  It can not be used to create a cache
+ * line aligned global buffer.
+ */
+#include <asm/cache.h>
+#define ALLOC_CACHE_ALIGN_BUFFER(type, name, size)			\
+	char __##name[ROUND(size * sizeof(type), ARCH_DMA_MINALIGN) +	\
+		      ARCH_DMA_MINALIGN - 1];				\
+									\
+	type *name = (type *) ALIGN((uintptr_t)__##name, ARCH_DMA_MINALIGN)
+
 #endif /* __ASSEMBLY__ */
 
 /* Put only stuff here that the assembler can digest */
@@ -711,7 +793,7 @@ int cpu_release(int nr, int argc, char *argv[]);
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
-#define ROUND(a,b)		(((a) + (b)) & ~((b) - 1))
+#define ROUND(a,b)		(((a) + (b) - 1) & ~((b) - 1))
 #define DIV_ROUND(n,d)		(((n) + ((d)/2)) / (d))
 #define DIV_ROUND_UP(n,d)	(((n) + (d) - 1) / (d))
 #define roundup(x, y)		((((x) + ((y) - 1)) / (y)) * (y))

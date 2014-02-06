@@ -36,10 +36,12 @@ COBJS-$(CONFIG_USB_SL811HS) += sl811-hcd.o
 # echi
 COBJS-$(CONFIG_USB_EHCI) += ehci-hcd.o
 COBJS-$(CONFIG_USB_EHCI_FSL) += ehci-fsl.o
+COBJS-$(CONFIG_USB_EHCI_IMX51) += ehci-imx51.o
 COBJS-$(CONFIG_USB_EHCI_IXP4XX) += ehci-ixp.o
 COBJS-$(CONFIG_USB_EHCI_KIRKWOOD) += ehci-kirkwood.o
 COBJS-$(CONFIG_USB_EHCI_PCI) += ehci-pci.o
 COBJS-$(CONFIG_USB_EHCI_VCT) += ehci-vct.o
+COBJS-$(CONFIG_USB_EHCI_MX5) += ehci-mx5.o
 
 COBJS	:= $(COBJS-y)
 SRCS	:= $(COBJS:.o=.c)

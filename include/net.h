@@ -105,6 +105,7 @@ struct eth_device {
 #ifdef CONFIG_MCAST_TFTP
 	int (*mcast) (struct eth_device*, u32 ip, u8 set);
 #endif
+	int  (*write_hwaddr) (struct eth_device *);
 	struct eth_device *next;
 	void *priv;
 };
@@ -416,6 +417,8 @@ extern int	NetSendUDPPacket(uchar *ether, IPaddr_t dest, int dport, int sport, i
 /* Processes a received packet */
 extern void	NetReceive(volatile uchar *, int);
 
+extern void netboot_update_env (void);
+
 /*
  * The following functions are a bit ugly, but necessary to deal with
  * alignment restrictions on ARM.
@@ -518,5 +521,7 @@ extern ushort getenv_VLAN(char *);
 extern void	copy_filename (char *dst, char *src, int size);
 
 /**********************************************************************/
+#define PRINT_INFO(args...)	if (!NetSilent) { printf(args); }
+#define PUTS_INFO(args...)	if (!NetSilent) { puts(args); }
 
 #endif /* __NET_H__ */

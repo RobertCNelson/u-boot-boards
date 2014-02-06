@@ -39,6 +39,7 @@
 typedef struct bd_info {
     int			bi_baudrate;	/* serial console baudrate */
     unsigned long	bi_ip_addr;	/* IP Address */
+    unsigned char	hwid[6];	/* In other modules mac addres, in this one, hwid */
     struct environment_s	       *bi_env;
     ulong	        bi_arch_number;	/* unique id for this board */
     ulong	        bi_boot_params;	/* where this board expects params */
@@ -47,6 +48,14 @@ typedef struct bd_info {
 	ulong start;
 	ulong size;
     }			bi_dram[CONFIG_NR_DRAM_BANKS];
+#ifdef CONFIG_CMD_BSP
+    /**
+     * If this structure is changed, let other OS maintainers to update their
+     * code acordingly (Windows CE...)
+     **/
+     unsigned long      nvram_addr;     /* Address of the nvram environment */
+     unsigned long      fb_base;
+#endif /* CONFIG_CMD_BSP */
 } bd_t;
 
 #define bi_env_data bi_env->data

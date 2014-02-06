@@ -9,6 +9,7 @@
  * Copyright (c) 2003	Richard Woodruff <r-woodruff2@ti.com>
  * Copyright (c) 2003	Kshitij <kshitij@ti.com>
  * Copyright (c) 2006-2008 Syed Mohammed Khasim <x0khasim@ti.com>
+ * Copyright (c) 2009 Freescale Semiconductor, Inc.
  *
  * See file CREDITS for list of people who contributed to this
  * project.
@@ -81,7 +82,7 @@ _bss_start:
 
 .globl _bss_end
 _bss_end:
-	.word _end
+	.word __end
 
 #ifdef CONFIG_USE_IRQ
 /* IRQ stack memory (calculated at run-time) */
@@ -177,6 +178,9 @@ clbss_l:
 	add	r0, r0, #4		@ increment clear index pointer
 	bne	clbss_l			@ keep clearing till at end
 
+#ifdef CONFIG_ARCH_MMU
+	bl board_mmu_init
+#endif
 	ldr	pc, _start_armboot	@ jump to C code
 
 _start_armboot: .word start_armboot

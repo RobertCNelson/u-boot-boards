@@ -370,6 +370,19 @@ void status_led_set  (int led, int state);
 
 #define STATUS_LED_BOOT		0	/* LED 0 used for boot status */
 
+#elif defined(CONFIG_CCIMX51)
+
+#define STATUS_LED_BIT		USER_LED1_GPIO
+#define STATUS_LED_PERIOD	(CONFIG_SYS_HZ / 2)
+#define STATUS_LED_STATE	STATUS_LED_OFF
+
+#define STATUS_LED_BIT1		USER_LED2_GPIO
+#define STATUS_LED_PERIOD1	(CONFIG_SYS_HZ / 4)
+#define STATUS_LED_STATE1	STATUS_LED_OFF
+
+#define STATUS_LED_ACTIVE	0	/* LED on for bit == 0  */
+#define STATUS_LED_BOOT		0  	/* USER LED1 used for boot status */
+
 #elif defined(CONFIG_BOARD_SPECIFIC_LED)
 /* led_id_t is unsigned long mask */
 typedef unsigned long led_id_t;

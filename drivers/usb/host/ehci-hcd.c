@@ -25,6 +25,7 @@
 #include <usb.h>
 #include <asm/io.h>
 #include <malloc.h>
+#include <watchdog.h>
 
 #include "ehci.h"
 
@@ -47,7 +48,7 @@ static struct descriptor {
 		0x29,		/* bDescriptorType: hub descriptor */
 		2,		/* bNrPorts -- runtime modified */
 		0,		/* wHubCharacteristics */
-		0xff,		/* bPwrOn2PwrGood */
+		10,		/* bPwrOn2PwrGood */
 		0,		/* bHubCntrCurrent */
 		{},		/* Device removable */
 		{}		/* at most 7 ports! XXX */
@@ -55,14 +56,14 @@ static struct descriptor {
 	{
 		0x12,		/* bLength */
 		1,		/* bDescriptorType: UDESC_DEVICE */
-		0x0002,		/* bcdUSB: v2.0 */
+		cpu_to_le16(0x0200), /* bcdUSB: v2.0 */
 		9,		/* bDeviceClass: UDCLASS_HUB */
 		0,		/* bDeviceSubClass: UDSUBCLASS_HUB */
 		1,		/* bDeviceProtocol: UDPROTO_HSHUBSTT */
 		64,		/* bMaxPacketSize: 64 bytes */
 		0x0000,		/* idVendor */
 		0x0000,		/* idProduct */
-		0x0001,		/* bcdDevice */
+		cpu_to_le16(0x0100), /* bcdDevice */
 		1,		/* iManufacturer */
 		2,		/* iProduct */
 		0,		/* iSerialNumber */
@@ -96,7 +97,7 @@ static struct descriptor {
 				 * UE_DIR_IN | EHCI_INTR_ENDPT
 				 */
 		3,		/* bmAttributes: UE_INTERRUPT */
-		8, 0,		/* wMaxPacketSize */
+		8,		/* wMaxPacketSize */
 		255		/* bInterval */
 	},
 };
@@ -107,118 +108,28 @@ static struct descriptor {
 #define ehci_is_TDI()	(0)
 #endif
 
-#if defined(CONFIG_EHCI_DCACHE)
-/*
- * Routines to handle (flush/invalidate) the dcache for the QH and qTD
- * structures and data buffers. This is needed on platforms using this
- * EHCI support with dcache enabled.
- */
-static void flush_invalidate(u32 addr, int size, int flush)
+void __ehci_powerup_fixup(uint32_t *status_reg, uint32_t *reg)
 {
-	if (flush)
-		flush_dcache_range(addr, addr + size);
-	else
-		invalidate_dcache_range(addr, addr + size);
+	udelay(50000);
 }
 
-static void cache_qtd(struct qTD *qtd, int flush)
-{
-	u32 *ptr = (u32 *)qtd->qt_buffer[0];
-	int len = (qtd->qt_token & 0x7fff0000) >> 16;
-
-	flush_invalidate((u32)qtd, sizeof(struct qTD), flush);
-	if (ptr && len)
-		flush_invalidate((u32)ptr, len, flush);
-}
-
-
-static inline struct QH *qh_addr(struct QH *qh)
-{
-	return (struct QH *)((u32)qh & 0xffffffe0);
-}
-
-static void cache_qh(struct QH *qh, int flush)
-{
-	struct qTD *qtd;
-	struct qTD *next;
-	static struct qTD *first_qtd;
-
-	/*
-	 * Walk the QH list and flush/invalidate all entries
-	 */
-	while (1) {
-		flush_invalidate((u32)qh_addr(qh), sizeof(struct QH), flush);
-		if ((u32)qh & QH_LINK_TYPE_QH)
-			break;
-		qh = qh_addr(qh);
-		qh = (struct QH *)qh->qh_link;
-	}
-	qh = qh_addr(qh);
-
-	/*
-	 * Save first qTD pointer, needed for invalidating pass on this QH
-	 */
-	if (flush)
-		first_qtd = qtd = (struct qTD *)(*(u32 *)&qh->qh_overlay &
-						 0xffffffe0);
-	else
-		qtd = first_qtd;
-
-	/*
-	 * Walk the qTD list and flush/invalidate all entries
-	 */
-	while (1) {
-		if (qtd == NULL)
-			break;
-		cache_qtd(qtd, flush);
-		next = (struct qTD *)((u32)qtd->qt_next & 0xffffffe0);
-		if (next == qtd)
-			break;
-		qtd = next;
-	}
-}
-
-static inline void ehci_flush_dcache(struct QH *qh)
-{
-	cache_qh(qh, 1);
-}
-
-static inline void ehci_invalidate_dcache(struct QH *qh)
-{
-	cache_qh(qh, 0);
-}
-#else /* CONFIG_EHCI_DCACHE */
-/*
- *
- */
-static inline void ehci_flush_dcache(struct QH *qh)
-{
-}
-
-static inline void ehci_invalidate_dcache(struct QH *qh)
-{
-}
-#endif /* CONFIG_EHCI_DCACHE */
+void ehci_powerup_fixup(uint32_t *status_reg, uint32_t *reg)
+	__attribute__((weak, alias("__ehci_powerup_fixup")));
 
 static int handshake(uint32_t *ptr, uint32_t mask, uint32_t done, int usec)
 {
 	uint32_t result;
 	do {
 		result = ehci_readl(ptr);
+		udelay(5);
 		if (result == ~(uint32_t)0)
 			return -1;
 		result &= mask;
 		if (result == done)
 			return 0;
-		udelay(1);
 		usec--;
 	} while (usec > 0);
 	return -1;
-}
-
-static void ehci_free(void *p, size_t sz)
-{
-
 }
 
 static int ehci_reset(void)
@@ -229,7 +140,7 @@ static int ehci_reset(void)
 	int ret = 0;
 
 	cmd = ehci_readl(&hcor->or_usbcmd);
-	cmd |= CMD_RESET;
+	cmd = (cmd & ~CMD_RUN) | CMD_RESET;
 	ehci_writel(&hcor->or_usbcmd, cmd);
 	ret = handshake((uint32_t *)&hcor->or_usbcmd, CMD_RESET, 0, 250 * 1000);
 	if (ret < 0) {
@@ -246,48 +157,35 @@ static int ehci_reset(void)
 #endif
 		ehci_writel(reg_ptr, tmp);
 	}
+
+#ifdef CONFIG_USB_EHCI_TXFIFO_THRESH
+	cmd = ehci_readl(&hcor->or_txfilltuning);
+	cmd &= ~TXFIFO_THRESH(0x3f);
+	cmd |= TXFIFO_THRESH(CONFIG_USB_EHCI_TXFIFO_THRESH);
+	ehci_writel(&hcor->or_txfilltuning, cmd);
+#endif
 out:
 	return ret;
 }
 
-static void *ehci_alloc(size_t sz, size_t align)
-{
-	static struct QH qh __attribute__((aligned(32)));
-	static struct qTD td[3] __attribute__((aligned (32)));
-	static int ntds;
-	void *p;
-
-	switch (sz) {
-	case sizeof(struct QH):
-		p = &qh;
-		ntds = 0;
-		break;
-	case sizeof(struct qTD):
-		if (ntds == 3) {
-			debug("out of TDs\n");
-			return NULL;
-		}
-		p = &td[ntds];
-		ntds++;
-		break;
-	default:
-		debug("unknown allocation size\n");
-		return NULL;
-	}
-
-	memset(p, sz, 0);
-	return p;
-}
-
 static int ehci_td_buffer(struct qTD *td, void *buf, size_t sz)
 {
-	uint32_t addr, delta, next;
+	uint32_t delta, next;
+	uint32_t addr = (uint32_t)buf;
+	size_t rsz = roundup(sz, 32);
 	int idx;
 
-	addr = (uint32_t) buf;
+	if (sz != rsz)
+		debug("EHCI-HCD: Misaligned buffer size (%08x)\n", sz);
+
+	if (addr & 31)
+		debug("EHCI-HCD: Misaligned buffer address (%p)\n", buf);
+
 	idx = 0;
 	while (idx < 5) {
+		flush_dcache_range(addr, addr + rsz);
 		td->qt_buffer[idx] = cpu_to_hc32(addr);
+		td->qt_buffer_hi[idx] = 0;
 		next = (addr + 4096) & ~4095;
 		delta = next - addr;
 		if (delta >= sz)
@@ -309,14 +207,17 @@ static int
 ehci_submit_async(struct usb_device *dev, unsigned long pipe, void *buffer,
 		   int length, struct devrequest *req)
 {
-	struct QH *qh;
-	struct qTD *td;
+	static struct QH qh __attribute__((aligned(32)));
+	static struct qTD qtd[3] __attribute__((aligned (32)));
+	int qtd_counter = 0;
+
 	volatile struct qTD *vtd;
 	unsigned long ts;
 	uint32_t *tdp;
 	uint32_t endpt, token, usbsts;
 	uint32_t c, toggle;
 	uint32_t cmd;
+	int timeout;
 	int ret = 0;
 
 	debug("dev=%p, pipe=%lx, buffer=%p, length=%d, req=%p\n", dev, pipe,
@@ -328,12 +229,22 @@ ehci_submit_async(struct usb_device *dev, unsigned long pipe, void *buffer,
 		      le16_to_cpu(req->value), le16_to_cpu(req->value),
 		      le16_to_cpu(req->index));
 
-	qh = ehci_alloc(sizeof(struct QH), 32);
-	if (qh == NULL) {
-		debug("unable to allocate QH\n");
-		return -1;
-	}
-	qh->qh_link = cpu_to_hc32((uint32_t)&qh_list | QH_LINK_TYPE_QH);
+	memset(&qh, 0, sizeof(struct QH));
+	memset(qtd, 0, sizeof(qtd));
+
+	toggle = usb_gettoggle(dev, usb_pipeendpoint(pipe), usb_pipeout(pipe));
+
+	/*
+	 * Setup QH (3.6 in ehci-r10.pdf)
+	 *
+	 *   qh_link ................. 03-00 H
+	 *   qh_endpt1 ............... 07-04 H
+	 *   qh_endpt2 ............... 0B-08 H
+	 * - qh_curtd
+	 *   qh_overlay.qt_next ...... 13-10 H
+	 * - qh_overlay.qt_altnext
+	 */
+	qh.qh_link = cpu_to_hc32((uint32_t)&qh_list | QH_LINK_TYPE_QH);
 	c = (usb_pipespeed(pipe) != USB_SPEED_HIGH &&
 	     usb_pipeendpoint(pipe) == 0) ? 1 : 0;
 	endpt = (8 << 28) |
@@ -344,89 +255,98 @@ ehci_submit_async(struct usb_device *dev, unsigned long pipe, void *buffer,
 	    (usb_pipespeed(pipe) << 12) |
 	    (usb_pipeendpoint(pipe) << 8) |
 	    (0 << 7) | (usb_pipedevice(pipe) << 0);
-	qh->qh_endpt1 = cpu_to_hc32(endpt);
+	qh.qh_endpt1 = cpu_to_hc32(endpt);
 	endpt = (1 << 30) |
 	    (dev->portnr << 23) |
 	    (dev->parent->devnum << 16) | (0 << 8) | (0 << 0);
-	qh->qh_endpt2 = cpu_to_hc32(endpt);
-	qh->qh_overlay.qt_next = cpu_to_hc32(QT_NEXT_TERMINATE);
-	qh->qh_overlay.qt_altnext = cpu_to_hc32(QT_NEXT_TERMINATE);
+	qh.qh_endpt2 = cpu_to_hc32(endpt);
+	qh.qh_overlay.qt_next = cpu_to_hc32(QT_NEXT_TERMINATE);
 
-	td = NULL;
-	tdp = &qh->qh_overlay.qt_next;
-
-	toggle =
-	    usb_gettoggle(dev, usb_pipeendpoint(pipe), usb_pipeout(pipe));
+	tdp = &qh.qh_overlay.qt_next;
 
 	if (req != NULL) {
-		td = ehci_alloc(sizeof(struct qTD), 32);
-		if (td == NULL) {
-			debug("unable to allocate SETUP td\n");
-			goto fail;
-		}
-		td->qt_next = cpu_to_hc32(QT_NEXT_TERMINATE);
-		td->qt_altnext = cpu_to_hc32(QT_NEXT_TERMINATE);
+		/*
+		 * Setup request qTD (3.5 in ehci-r10.pdf)
+		 *
+		 *   qt_next ................ 03-00 H
+		 *   qt_altnext ............. 07-04 H
+		 *   qt_token ............... 0B-08 H
+		 *
+		 *   [ buffer, buffer_hi ] loaded with "req".
+		 */
+		qtd[qtd_counter].qt_next = cpu_to_hc32(QT_NEXT_TERMINATE);
+		qtd[qtd_counter].qt_altnext = cpu_to_hc32(QT_NEXT_TERMINATE);
 		token = (0 << 31) |
 		    (sizeof(*req) << 16) |
 		    (0 << 15) | (0 << 12) | (3 << 10) | (2 << 8) | (0x80 << 0);
-		td->qt_token = cpu_to_hc32(token);
-		if (ehci_td_buffer(td, req, sizeof(*req)) != 0) {
+		qtd[qtd_counter].qt_token = cpu_to_hc32(token);
+		if (ehci_td_buffer(&qtd[qtd_counter], req, sizeof(*req)) != 0) {
 			debug("unable construct SETUP td\n");
-			ehci_free(td, sizeof(*td));
 			goto fail;
 		}
-		*tdp = cpu_to_hc32((uint32_t) td);
-		tdp = &td->qt_next;
+		/* Update previous qTD! */
+		*tdp = cpu_to_hc32((uint32_t)&qtd[qtd_counter]);
+		tdp = &qtd[qtd_counter++].qt_next;
 		toggle = 1;
 	}
 
 	if (length > 0 || req == NULL) {
-		td = ehci_alloc(sizeof(struct qTD), 32);
-		if (td == NULL) {
-			debug("unable to allocate DATA td\n");
-			goto fail;
-		}
-		td->qt_next = cpu_to_hc32(QT_NEXT_TERMINATE);
-		td->qt_altnext = cpu_to_hc32(QT_NEXT_TERMINATE);
+		/*
+		 * Setup request qTD (3.5 in ehci-r10.pdf)
+		 *
+		 *   qt_next ................ 03-00 H
+		 *   qt_altnext ............. 07-04 H
+		 *   qt_token ............... 0B-08 H
+		 *
+		 *   [ buffer, buffer_hi ] loaded with "buffer".
+		 */
+		qtd[qtd_counter].qt_next = cpu_to_hc32(QT_NEXT_TERMINATE);
+		qtd[qtd_counter].qt_altnext = cpu_to_hc32(QT_NEXT_TERMINATE);
 		token = (toggle << 31) |
 		    (length << 16) |
 		    ((req == NULL ? 1 : 0) << 15) |
 		    (0 << 12) |
 		    (3 << 10) |
 		    ((usb_pipein(pipe) ? 1 : 0) << 8) | (0x80 << 0);
-		td->qt_token = cpu_to_hc32(token);
-		if (ehci_td_buffer(td, buffer, length) != 0) {
+		qtd[qtd_counter].qt_token = cpu_to_hc32(token);
+		if (ehci_td_buffer(&qtd[qtd_counter], buffer, length) != 0) {
 			debug("unable construct DATA td\n");
-			ehci_free(td, sizeof(*td));
 			goto fail;
 		}
-		*tdp = cpu_to_hc32((uint32_t) td);
-		tdp = &td->qt_next;
+		/* Update previous qTD! */
+		*tdp = cpu_to_hc32((uint32_t)&qtd[qtd_counter]);
+		tdp = &qtd[qtd_counter++].qt_next;
 	}
 
 	if (req != NULL) {
-		td = ehci_alloc(sizeof(struct qTD), 32);
-		if (td == NULL) {
-			debug("unable to allocate ACK td\n");
-			goto fail;
-		}
-		td->qt_next = cpu_to_hc32(QT_NEXT_TERMINATE);
-		td->qt_altnext = cpu_to_hc32(QT_NEXT_TERMINATE);
+		/*
+		 * Setup request qTD (3.5 in ehci-r10.pdf)
+		 *
+		 *   qt_next ................ 03-00 H
+		 *   qt_altnext ............. 07-04 H
+		 *   qt_token ............... 0B-08 H
+		 */
+		qtd[qtd_counter].qt_next = cpu_to_hc32(QT_NEXT_TERMINATE);
+		qtd[qtd_counter].qt_altnext = cpu_to_hc32(QT_NEXT_TERMINATE);
 		token = (toggle << 31) |
 		    (0 << 16) |
 		    (1 << 15) |
 		    (0 << 12) |
 		    (3 << 10) |
 		    ((usb_pipein(pipe) ? 0 : 1) << 8) | (0x80 << 0);
-		td->qt_token = cpu_to_hc32(token);
-		*tdp = cpu_to_hc32((uint32_t) td);
-		tdp = &td->qt_next;
+		qtd[qtd_counter].qt_token = cpu_to_hc32(token);
+		/* Update previous qTD! */
+		*tdp = cpu_to_hc32((uint32_t)&qtd[qtd_counter]);
+		tdp = &qtd[qtd_counter++].qt_next;
 	}
 
-	qh_list.qh_link = cpu_to_hc32((uint32_t) qh | QH_LINK_TYPE_QH);
+	qh_list.qh_link = cpu_to_hc32((uint32_t)&qh | QH_LINK_TYPE_QH);
 
 	/* Flush dcache */
-	ehci_flush_dcache(&qh_list);
+	flush_dcache_range((uint32_t)&qh_list,
+		(uint32_t)&qh_list + sizeof(struct QH));
+	flush_dcache_range((uint32_t)&qh, (uint32_t)&qh + sizeof(struct QH));
+	flush_dcache_range((uint32_t)qtd, (uint32_t)qtd + sizeof(qtd));
 
 	usbsts = ehci_readl(&hcor->or_usbsts);
 	ehci_writel(&hcor->or_usbsts, (usbsts & 0x3f));
@@ -445,14 +365,31 @@ ehci_submit_async(struct usb_device *dev, unsigned long pipe, void *buffer,
 
 	/* Wait for TDs to be processed. */
 	ts = get_timer(0);
-	vtd = td;
+	vtd = &qtd[qtd_counter - 1];
+	timeout = USB_TIMEOUT_MS(pipe);
 	do {
 		/* Invalidate dcache */
-		ehci_invalidate_dcache(&qh_list);
+		invalidate_dcache_range((uint32_t)&qh_list,
+			(uint32_t)&qh_list + sizeof(struct QH));
+		invalidate_dcache_range((uint32_t)&qh,
+			(uint32_t)&qh + sizeof(struct QH));
+		invalidate_dcache_range((uint32_t)qtd,
+			(uint32_t)qtd + sizeof(qtd));
+
 		token = hc32_to_cpu(vtd->qt_token);
 		if (!(token & 0x80))
 			break;
-	} while (get_timer(ts) < CONFIG_SYS_HZ);
+		WATCHDOG_RESET();
+	} while (get_timer(ts) < timeout);
+
+	/* Invalidate the memory area occupied by buffer */
+	invalidate_dcache_range(((uint32_t)buffer & ~31),
+		((uint32_t)buffer & ~31) + roundup(length, 32));
+
+	/* Check that the TD processing happened */
+	if (token & 0x80) {
+		printf("EHCI timed out on TD - token=%#x\n", token);
+	}
 
 	/* Disable async schedule. */
 	cmd = ehci_readl(&hcor->or_usbcmd);
@@ -468,7 +405,7 @@ ehci_submit_async(struct usb_device *dev, unsigned long pipe, void *buffer,
 
 	qh_list.qh_link = cpu_to_hc32((uint32_t)&qh_list | QH_LINK_TYPE_QH);
 
-	token = hc32_to_cpu(qh->qh_overlay.qt_token);
+	token = hc32_to_cpu(qh.qh_overlay.qt_token);
 	if (!(token & 0x80)) {
 		debug("TOKEN=%#x\n", token);
 		switch (token & 0xfc) {
@@ -491,6 +428,8 @@ ehci_submit_async(struct usb_device *dev, unsigned long pipe, void *buffer,
 			break;
 		default:
 			dev->status = USB_ST_CRC_ERR;
+			if ((token & 0x40) == 0x40)
+				dev->status |= USB_ST_STALLED;
 			break;
 		}
 		dev->act_len = length - ((token >> 16) & 0x7fff);
@@ -505,13 +444,6 @@ ehci_submit_async(struct usb_device *dev, unsigned long pipe, void *buffer,
 	return (dev->status != USB_ST_NOT_PROC) ? 0 : -1;
 
 fail:
-	td = (void *)hc32_to_cpu(qh->qh_overlay.qt_next);
-	while (td != (void *)QT_NEXT_TERMINATE) {
-		qh->qh_overlay.qt_next = td->qt_next;
-		ehci_free(td, sizeof(*td));
-		td = (void *)hc32_to_cpu(qh->qh_overlay.qt_next);
-	}
-	ehci_free(qh, sizeof(*qh));
 	return -1;
 }
 
@@ -536,7 +468,7 @@ ehci_submit_root(struct usb_device *dev, unsigned long pipe, void *buffer,
 	uint32_t reg;
 	uint32_t *status_reg;
 
-	if (le16_to_cpu(req->index) >= CONFIG_SYS_USB_EHCI_MAX_ROOT_PORTS) {
+	if (le16_to_cpu(req->index) > CONFIG_SYS_USB_EHCI_MAX_ROOT_PORTS) {
 		printf("The request port(%d) is not configured\n",
 			le16_to_cpu(req->index) - 1);
 		return -1;
@@ -630,19 +562,8 @@ ehci_submit_root(struct usb_device *dev, unsigned long pipe, void *buffer,
 			tmpbuf[0] |= USB_PORT_STAT_SUSPEND;
 		if (reg & EHCI_PS_OCA)
 			tmpbuf[0] |= USB_PORT_STAT_OVERCURRENT;
-		if (reg & EHCI_PS_PR &&
-		    (portreset & (1 << le16_to_cpu(req->index)))) {
-			int ret;
-			/* force reset to complete */
-			reg = reg & ~(EHCI_PS_PR | EHCI_PS_CLEAR);
-			ehci_writel(status_reg, reg);
-			ret = handshake(status_reg, EHCI_PS_PR, 0, 2 * 1000);
-			if (!ret)
-				tmpbuf[0] |= USB_PORT_STAT_RESET;
-			else
-				printf("port(%d) reset error\n",
-					le16_to_cpu(req->index) - 1);
-		}
+		if (reg & EHCI_PS_PR)
+			tmpbuf[0] |= USB_PORT_STAT_RESET;
 		if (reg & EHCI_PS_PP)
 			tmpbuf[1] |= USB_PORT_STAT_POWER >> 8;
 
@@ -699,6 +620,8 @@ ehci_submit_root(struct usb_device *dev, unsigned long pipe, void *buffer,
 				ehci_writel(status_reg, reg);
 				break;
 			} else {
+				int ret;
+
 				reg |= EHCI_PS_PR;
 				reg &= ~EHCI_PS_PE;
 				ehci_writel(status_reg, reg);
@@ -707,8 +630,22 @@ ehci_submit_root(struct usb_device *dev, unsigned long pipe, void *buffer,
 				 * usb 2.0 specification say 50 ms resets on
 				 * root
 				 */
-				wait_ms(50);
-				portreset |= 1 << le16_to_cpu(req->index);
+				ehci_powerup_fixup(status_reg, &reg);
+
+				ehci_writel(status_reg, reg & ~EHCI_PS_PR);
+				/*
+				 * A host controller must terminate the reset
+				 * and stabilize the state of the port within
+				 * 2 milliseconds
+				 */
+				ret = handshake(status_reg, EHCI_PS_PR, 0,
+						2 * 1000);
+				if (!ret)
+					portreset |=
+						1 << le16_to_cpu(req->index);
+				else
+					printf("port(%d) reset error\n",
+					le16_to_cpu(req->index) - 1);
 			}
 			break;
 		default:
@@ -752,7 +689,7 @@ ehci_submit_root(struct usb_device *dev, unsigned long pipe, void *buffer,
 		goto unknown;
 	}
 
-	wait_ms(1);
+	udelay(1000);
 	len = min3(srclen, le16_to_cpu(req->length), length);
 	if (srcptr != NULL && len > 0)
 		memcpy(buffer, srcptr, len);
@@ -833,7 +770,7 @@ int usb_lowlevel_init(void)
 	ehci_writel(&hcor->or_configflag, cmd);
 	/* unblock posted write */
 	cmd = ehci_readl(&hcor->or_usbcmd);
-	wait_ms(5);
+	udelay(5000);
 	reg = HC_VERSION(ehci_readl(&hccr->cr_capbase));
 	printf("USB EHCI %x.%02x\n", reg >> 8, reg & 0xff);
 
@@ -879,5 +816,5 @@ submit_int_msg(struct usb_device *dev, unsigned long pipe, void *buffer,
 
 	debug("dev=%p, pipe=%lu, buffer=%p, length=%d, interval=%d",
 	      dev, pipe, buffer, length, interval);
-	return -1;
+	return ehci_submit_async(dev, pipe, buffer, length, NULL);
 }

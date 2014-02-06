@@ -91,7 +91,7 @@ U_BOOT_CMD(
 );
 #endif
 
-static void netboot_update_env (void)
+void netboot_update_env (void)
 {
 	char tmp[22];
 
@@ -194,7 +194,7 @@ netboot_common (proto_t proto, cmd_tbl_t *cmdtp, int argc, char *argv[])
 	show_boot_progress (80);
 	if ((size = NetLoop(proto)) < 0) {
 		show_boot_progress (-81);
-		return 1;
+		return -1;
 	}
 
 	show_boot_progress (81);

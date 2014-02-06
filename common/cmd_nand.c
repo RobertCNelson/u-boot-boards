@@ -28,6 +28,9 @@
 #include <jffs2/jffs2.h>
 #include <nand.h>
 
+//#define CONFIG_CMD_NAND_BITERROR
+
+
 #if defined(CONFIG_CMD_MTDPARTS)
 
 /* parition handling routines */
@@ -282,7 +285,9 @@ int do_nand(cmd_tbl_t * cmdtp, int flag, int argc, char *argv[])
 	    strncmp(cmd, "dump", 4) != 0 &&
 	    strncmp(cmd, "read", 4) != 0 && strncmp(cmd, "write", 5) != 0 &&
 	    strcmp(cmd, "scrub") != 0 && strcmp(cmd, "markbad") != 0 &&
+#ifndef CONFIG_CMD_NAND_BITERROR
 	    strcmp(cmd, "biterr") != 0 &&
+#endif
 	    strcmp(cmd, "lock") != 0 && strcmp(cmd, "unlock") != 0 )
 		goto usage;
 
@@ -296,9 +301,19 @@ int do_nand(cmd_tbl_t * cmdtp, int flag, int argc, char *argv[])
 
 	if (strcmp(cmd, "bad") == 0) {
 		printf("\nDevice %d bad blocks:\n", nand_curr_device);
-		for (off = 0; off < nand->size; off += nand->erasesize)
+		for (off = 0; off < nand->size; off += nand->erasesize) {
 			if (nand_block_isbad(nand, off))
 				printf("  %08lx\n", off);
+			/*
+			 *FIXME: currently, uboot cmd_nand does not
+			 * support 64bit address space. It will make
+			 * the for loop the infinit loop due to off is
+			 * 32bit width with ulong definiton on arm gcc.
+			 * Break the for loop when off overflow.
+			 */
+			if (off > off + nand->erasesize)
+				break;
+		}
 		return 0;
 	}
 
@@ -426,6 +441,7 @@ int do_nand(cmd_tbl_t * cmdtp, int flag, int argc, char *argv[])
 				printf("block 0x%08lx NOT marked "
 					"as bad! ERROR %d\n",
 					addr, ret);
+				puts("The block must be erased beforehand\n");
 				ret = 1;
 			} else {
 				printf("block 0x%08lx successfully "
@@ -437,12 +453,12 @@ int do_nand(cmd_tbl_t * cmdtp, int flag, int argc, char *argv[])
 		}
 		return ret;
 	}
-
+#ifndef CONFIG_CMD_NAND_BITERROR
 	if (strcmp(cmd, "biterr") == 0) {
-		/* todo */
+		/* TODO */
 		return 1;
 	}
-
+#endif
 #ifdef CONFIG_CMD_NAND_LOCK_UNLOCK
 	if (strcmp(cmd, "lock") == 0) {
 		int tight = 0;
@@ -498,9 +514,12 @@ U_BOOT_CMD(nand, CONFIG_SYS_MAXARGS, 1, do_nand,
 	"    offset 'off' (entire device if not specified)\n"
 	"nand bad - show bad blocks\n"
 	"nand dump[.oob] off - dump page\n"
-	"nand scrub - really clean NAND erasing bad blocks (UNSAFE)\n"
+	"nand scrub [off size] - really clean NAND erasing bad blocks (UNSAFE)\n"
+	"    form offset 'off' (entire device if not specified)\n"
 	"nand markbad off [...] - mark bad block(s) at offset (UNSAFE)\n"
+#ifndef CONFIG_CMD_NAND_BITERROR
 	"nand biterr off - make a bit error at offset (UNSAFE)"
+#endif
 #ifdef CONFIG_CMD_NAND_LOCK_UNLOCK
 	"\n"
 	"nand lock [tight] [status]\n"

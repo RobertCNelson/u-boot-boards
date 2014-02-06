@@ -21,7 +21,8 @@
 #include <malloc.h>
 
 
-#if 0 /* not used - was: #ifndef __HAVE_ARCH_STRNICMP */
+//#if 0 /* not used - was: #ifndef __HAVE_ARCH_STRNICMP */
+#if 1
 /**
  * strnicmp - Case insensitive, length-limited string comparison
  * @s1: One string
@@ -456,6 +457,90 @@ void * memcpy(void * dest,const void *src,size_t count)
 	return dest;
 }
 #endif
+
+/**
+ * memcpy16 - memcpy with 16bit accesses
+ * @pvDst: Where to copy to
+ * @pvSrc: Where to copy from
+ * @iLen: The size of the area.
+ *
+ * You should not use this function to access IO space, use memcpy_toio()
+ * or memcpy_fromio() instead.
+ */
+void* memcpy16( void* pvDst, const void* pvSrc, __kernel_size_t iLen )
+{
+        const u16* puhSrc = (const u16*) pvSrc;
+        const u8*  pucSrc;
+        u16* puhDst = (u16*) pvDst;
+        u8*  pucDst;
+
+        /* larger chunks */
+	for( ; iLen >= 32; iLen -= 32 ) {
+                *puhDst++ = *puhSrc++;
+                *puhDst++ = *puhSrc++;
+                *puhDst++ = *puhSrc++;
+                *puhDst++ = *puhSrc++;
+                *puhDst++ = *puhSrc++;
+                *puhDst++ = *puhSrc++;
+                *puhDst++ = *puhSrc++;
+                *puhDst++ = *puhSrc++;
+                *puhDst++ = *puhSrc++;
+                *puhDst++ = *puhSrc++;
+                *puhDst++ = *puhSrc++;
+                *puhDst++ = *puhSrc++;
+                *puhDst++ = *puhSrc++;
+                *puhDst++ = *puhSrc++;
+                *puhDst++ = *puhSrc++;
+                *puhDst++ = *puhSrc++;
+	}
+
+        /* byte chunks */
+        pucSrc = (const u8*) puhSrc;
+        pucDst = (u8*) puhDst;
+
+	for( ; iLen > 0; iLen-- )
+                *pucDst++ = *pucSrc++;
+
+        return pvDst;
+}
+
+/**
+ * memcpy32 - memcpy with 32bit accesses
+ * @pvDst: Where to copy to
+ * @pvSrc: Where to copy from
+ * @iLen: The size of the area.
+ *
+ * You should not use this function to access IO space, use memcpy_toio()
+ * or memcpy_fromio() instead.
+ */
+void* memcpy32( void* pvDst, const void* pvSrc, __kernel_size_t iLen )
+{
+        const u32* puiSrc = (const u32*) pvSrc;
+        const u8*  pucSrc;
+        u32* puiDst = (u32*) pvDst;
+        u8*  pucDst;
+
+        /* larger chunks */
+	for( ; iLen >= 32; iLen -= 32 ) {
+                *puiDst++ = *puiSrc++;
+                *puiDst++ = *puiSrc++;
+                *puiDst++ = *puiSrc++;
+                *puiDst++ = *puiSrc++;
+                *puiDst++ = *puiSrc++;
+                *puiDst++ = *puiSrc++;
+                *puiDst++ = *puiSrc++;
+                *puiDst++ = *puiSrc++;
+	}
+
+        /* byte chunks */
+        pucSrc = (const u8*) puiSrc;
+        pucDst = (u8*) puiDst;
+        
+	for( ; iLen > 0; iLen-- )
+                *pucDst++ = *pucSrc++;
+
+        return pvDst;
+}
 
 #ifndef __HAVE_ARCH_MEMMOVE
 /**

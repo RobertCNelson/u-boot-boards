@@ -64,6 +64,9 @@ extern int gunzip (void *dst, int dstlen, unsigned char *src, unsigned long *len
 #define CONFIG_SYS_BOOTM_LEN	0x800000	/* use 8MByte as default max gunzip size */
 #endif
 
+image_header_t header;
+
+
 #ifdef CONFIG_BZIP2
 extern void bz_internal_error(int);
 #endif
@@ -713,6 +716,13 @@ static image_header_t *image_get_kernel (ulong img_addr, int verify)
 		return NULL;
 	}
 
+#if defined(CONFIG_MX51_BBG) || defined(CONFIG_MX51_3DS) || defined(CONFIG_CCIMX51)
+	if (image_get_load(hdr) < 0x90000000)
+		image_set_load(hdr, image_get_load(hdr)+0x20000000);
+	if (image_get_ep(hdr) < 0x90000000)
+		image_set_ep(hdr, image_get_ep(hdr)+0x20000000);
+#endif
+
 	show_boot_progress (3);
 	image_print_contents (hdr);
 
@@ -1188,7 +1198,7 @@ U_BOOT_CMD(
 #ifdef CONFIG_SILENT_CONSOLE
 static void fixup_silent_linux ()
 {
-	char buf[256], *start, *end;
+	char buf[2048], *start, *end;
 	char *cmdline = getenv ("bootargs");
 
 	/* Only fix cmdline when requested */

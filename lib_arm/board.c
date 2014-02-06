@@ -49,12 +49,33 @@
 #include <nand.h>
 #include <onenand_uboot.h>
 #include <mmc.h>
+#include <linux/mtd/mtd.h>
+
+#if defined (CONFIG_MX28)
+#include <asm/arch/regsicoll.h>
+#endif
 
 #ifdef CONFIG_DRIVER_SMC91111
 #include "../drivers/net/smc91111.h"
 #endif
 #ifdef CONFIG_DRIVER_LAN91C96
 #include "../drivers/net/lan91c96.h"
+#endif
+
+#if CONFIG_CMD_BSP
+extern int get_module_hw_id(void);
+extern int variant_has_ethernet(void);
+extern void config_after_flash_init(void);
+#define UBOOT
+#include "../common/digi/cmd_nvram/lib/include/nvram.h"
+#undef DEBUG  /* just in case it were defined in nvram.h and friends */
+#else
+#include <malloc.h>
+#endif
+
+extern int do_reset (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[]);	/* for do_reset() prototype */
+#if defined (CONFIG_MX28)
+extern int mx28_get_bootmode(void);
 #endif
 
 DECLARE_GLOBAL_DATA_PTR;
@@ -66,12 +87,20 @@ extern int  AT91F_DataflashInit(void);
 extern void dataflash_print_info(void);
 #endif
 
+#ifdef CONFIG_AUTOLOAD_BOOTSCRIPT
+extern void run_auto_script(void);
+#endif
+
+#if defined CONFIG_SPLASH_SCREEN && defined CONFIG_VIDEO_MX5
+extern void setup_splash_image(void);
+#endif
+
 #ifndef CONFIG_IDENT_STRING
 #define CONFIG_IDENT_STRING ""
 #endif
 
 const char version_string[] =
-	U_BOOT_VERSION" (" U_BOOT_DATE " - " U_BOOT_TIME ")"CONFIG_IDENT_STRING;
+	U_BOOT_VERSION" - (" U_BOOT_DATE " - " U_BOOT_TIME ")"CONFIG_IDENT_STRING;
 
 #ifdef CONFIG_DRIVER_CS8900
 extern void cs8900_get_enetaddr (void);
@@ -79,6 +108,10 @@ extern void cs8900_get_enetaddr (void);
 
 #ifdef CONFIG_DRIVER_RTL8019
 extern void rtl8019_get_enetaddr (uchar * addr);
+#endif
+
+#ifdef CONFIG_LCD
+extern int lcd_display_init(void);
 #endif
 
 #if defined(CONFIG_HARD_I2C) || \
@@ -124,23 +157,23 @@ void *sbrk (ptrdiff_t increment)
  * May be supplied by boards if desired
  */
 void inline __coloured_LED_init (void) {}
-void inline coloured_LED_init (void) __attribute__((weak, alias("__coloured_LED_init")));
+void coloured_LED_init (void) __attribute__((weak, alias("__coloured_LED_init")));
 void inline __red_LED_on (void) {}
-void inline red_LED_on (void) __attribute__((weak, alias("__red_LED_on")));
+void red_LED_on (void) __attribute__((weak, alias("__red_LED_on")));
 void inline __red_LED_off(void) {}
-void inline red_LED_off(void)	     __attribute__((weak, alias("__red_LED_off")));
+void red_LED_off(void) __attribute__((weak, alias("__red_LED_off")));
 void inline __green_LED_on(void) {}
-void inline green_LED_on(void) __attribute__((weak, alias("__green_LED_on")));
+void green_LED_on(void) __attribute__((weak, alias("__green_LED_on")));
 void inline __green_LED_off(void) {}
-void inline green_LED_off(void)__attribute__((weak, alias("__green_LED_off")));
+void green_LED_off(void) __attribute__((weak, alias("__green_LED_off")));
 void inline __yellow_LED_on(void) {}
-void inline yellow_LED_on(void)__attribute__((weak, alias("__yellow_LED_on")));
+void yellow_LED_on(void) __attribute__((weak, alias("__yellow_LED_on")));
 void inline __yellow_LED_off(void) {}
-void inline yellow_LED_off(void)__attribute__((weak, alias("__yellow_LED_off")));
+void yellow_LED_off(void) __attribute__((weak, alias("__yellow_LED_off")));
 void inline __blue_LED_on(void) {}
-void inline blue_LED_on(void)__attribute__((weak, alias("__blue_LED_on")));
+void blue_LED_on(void) __attribute__((weak, alias("__blue_LED_on")));
 void inline __blue_LED_off(void) {}
-void inline blue_LED_off(void)__attribute__((weak, alias("__blue_LED_off")));
+void blue_LED_off(void) __attribute__((weak, alias("__blue_LED_off")));
 
 /************************************************************************
  * Init Utilities							*
@@ -153,18 +186,33 @@ void inline blue_LED_off(void)__attribute__((weak, alias("__blue_LED_off")));
 #if defined(CONFIG_ARM_DCC) && !defined(CONFIG_BAUDRATE)
 #define CONFIG_BAUDRATE 115200
 #endif
-static int init_baudrate (void)
+extern int isvalid_baudrate(int baudrate);
+
+#define init_baudrate	init_baudrate_from_env
+int init_baudrate_from_env (void)
 {
+	int baudrate = CONFIG_BAUDRATE;
+#ifdef CONFIG_GET_BAUDRATE_FROM_VAR
 	char tmp[64];	/* long enough for environment variables */
 	int i = getenv_r ("baudrate", tmp, sizeof (tmp));
-	gd->bd->bi_baudrate = gd->baudrate = (i > 0)
-			? (int) simple_strtoul (tmp, NULL, 10)
-			: CONFIG_BAUDRATE;
+
+	if (i > 0) {
+		/* Check that the baudrate stored in the variable is supported.
+		* U-Boot doesn't allow you to change the variable to a wrong
+		* value, but the value could be changed from Linux or the
+		* NVRAM could be corrupted for some reason. */
+		baudrate = (int) simple_strtoul (tmp, NULL, 10);
+	}
+#endif
+	if (!isvalid_baudrate(baudrate)) {
+		baudrate = CONFIG_PLATFORM_BAUDRATE;
+	}
+	gd->bd->bi_baudrate = gd->baudrate = baudrate;
 
 	return (0);
 }
 
-static int display_banner (void)
+int display_banner (void)
 {
 	printf ("\n\n%s\n\n", version_string);
 	debug ("U-Boot code: %08lX -> %08lX  BSS: -> %08lX\n",
@@ -187,7 +235,7 @@ static int display_banner (void)
  * gives a simple yet clear indication which part of the
  * initialization if failing.
  */
-static int display_dram_config (void)
+int display_dram_config (void)
 {
 	int i;
 
@@ -288,11 +336,9 @@ init_fnc_t *init_sequence[] = {
 #if defined(CONFIG_HARD_I2C) || defined(CONFIG_SOFT_I2C)
 	init_func_i2c,
 #endif
-	dram_init,		/* configure available RAM banks */
 #if defined(CONFIG_CMD_PCI) || defined (CONFIG_PCI)
 	arm_pci_init,
 #endif
-	display_dram_config,
 	NULL,
 };
 
@@ -301,7 +347,12 @@ void start_armboot (void)
 	init_fnc_t **init_fnc_ptr;
 	char *s;
 #if defined(CONFIG_VFD) || defined(CONFIG_LCD)
-	unsigned long addr;
+	unsigned long addr = 0;
+#endif
+
+#if defined (CONFIG_MX28)
+	// Very early on disable the USB0 IRQ to avoid spurious interrupts
+	HW_ICOLL_INTERRUPTn_CLR(93,0x00000004);
 #endif
 
 	/* Pointer is writable since we allocated a register for it */
@@ -344,22 +395,6 @@ void start_armboot (void)
 	gd->fb_base = addr;
 #endif /* CONFIG_VFD */
 
-#ifdef CONFIG_LCD
-	/* board init may have inited fb_base */
-	if (!gd->fb_base) {
-#		ifndef PAGE_SIZE
-#		  define PAGE_SIZE 4096
-#		endif
-		/*
-		 * reserve memory for LCD display (always full pages)
-		 */
-		/* bss_end is defined in the board-specific linker script */
-		addr = (_bss_end + (PAGE_SIZE - 1)) & ~(PAGE_SIZE - 1);
-		lcd_setmem (addr);
-		gd->fb_base = addr;
-	}
-#endif /* CONFIG_LCD */
-
 #if defined(CONFIG_CMD_NAND)
 	puts ("NAND:  ");
 	nand_init();		/* go init the NAND */
@@ -374,20 +409,151 @@ void start_armboot (void)
 	dataflash_print_info();
 #endif
 
+#ifdef CONFIG_AFTER_FLASH_INIT
+	config_after_flash_init();
+#endif
+
+#if defined(CONFIG_MX28) && defined(CONFIG_CMD_BOOTSTREAM) && defined(CONFIG_NAND_GPMI)
+#define FCB_EXPECTED_OFFSET	6
+	{
+		unsigned char *nandbuf;
+		nand_info_t *nand = &nand_info[nand_curr_device];;
+		size_t size;
+		int ret;
+		char *s;
+		int i;
+
+		/* When running the CPU at 454MHz there are occasions in which
+		 * the NAND flash is not read correctly. There seems to be a problem
+		 * with the NAND controller because the data (when read) shows
+		 * displaced with a certain offset. As if the NAND was not properly
+		 * relocating the ECC metada or something.
+		 * This problem can easily be detected by reading the first block
+		 * of the NAND (guaranteed to be good) and locating the "FCB" signature
+		 * which (if the NAND is properly configured) will appear at offset 6.
+		 * Notice this is not the real offset of FCB at the NAND, but after being
+		 * processed by the NAND controller and put into the RAM buffer.
+		 * If we detect that the NVRAM cannot be read and the FCB signature is
+		 * not at the offset we expect it to be, then we hit the condition and
+		 * we must reset the CPU, to read the NVRAM correctly.
+		 * DIGI_UBOOT-22
+		 */
+		nandbuf = malloc(nand->writesize);
+		s = (char *)nandbuf;
+		size = nand->writesize;
+		if (NULL != nandbuf) {
+			/* Read the first block and check the FCB signature */
+			ret = nand_read_skip_bad(nand, 0, &size, (u_char *)nandbuf);
+			for (i=0; i < 100; i++) {
+				if (s[i] == 'F' && s[i+1] == 'C' && s[i+2] == 'B')
+					break;
+			}
+			if (i < 100 && i != FCB_EXPECTED_OFFSET) {
+				int bootmode = mx28_get_bootmode();
+
+				/* FCB was found but not at the expected offset.
+				 * The NAND controller went crazy!
+				 */
+				printf("NAND controller badly initialized\n");
+				if (BOOTMODE_USB0 != bootmode) {
+					/* Reset CPU unless booting from USB (recover) */
+					do_reset(NULL, 0, 0, NULL);
+				}
+			}
+			free(nandbuf);
+		}
+	}
+#endif
+
+#ifdef CONFIG_GENERIC_MMC
+	puts ("MMC:   ");
+	mmc_initialize (gd->bd);
+#endif
+
 	/* initialize environment */
 	env_relocate ();
+
+#if defined(CONFIG_CMD_BSP) && defined(CONFIG_PLATFORM_HAS_HWID)
+	get_module_hw_id();
+#endif
+	/* configure available RAM banks */
+	dram_init();
+	display_dram_config();
+
+	/* now we have a valid environment, even when reading from NAND. */
+#if defined(CONFIG_CMD_BSP)
+       if (bsp_init())             /* initialize common Digi BSP stuff */
+	       printf("Error during BSP initialization!\n");
+#endif
+	/* Switch to the configured baudrate. */
+#ifdef CONFIG_SERIAL_MULTI
+	serial_initialize();
+#endif
+	init_baudrate_from_env();
+#if !defined(CONFIG_SILENT_CONSOLE) && !defined(CONFIG_UBOOT_JTAG_CONSOLE)
+	serial_setbrg();
+
+	if (gd->bd->bi_baudrate != CONFIG_BAUDRATE)
+		display_banner();
+#endif
+
+#ifdef CONFIG_CMD_BSP
+	gd->bd->fb_base = 0xffffffff;
+#endif
+#ifdef CONFIG_LCD
+	/* board init may have inited fb_base */
+	if (!gd->fb_base) {
+#		ifndef PAGE_SIZE
+#		  define PAGE_SIZE 4096
+#		endif
+		/*
+		 * reserve memory for LCD display (always full pages)
+		 */
+#if defined(CONFIG_DISPLAY1_ENABLE) || defined(CONFIG_DISPLAY2_ENABLE)
+		if (!lcd_display_init()) {
+			char* saddr;
+			saddr = getenv ("fb_base");
+			if(saddr != NULL)
+				addr = simple_strtoul( saddr, NULL, 16 );
+			addr = lcd_setmem(addr);
+			gd->fb_base = addr;
+			gd->bd->fb_base = addr;
+		}
+#else
+		/* bss_end is defined in the board-specific linker script */
+		addr = (_bss_end + (PAGE_SIZE - 1)) & ~(PAGE_SIZE - 1);
+		lcd_setmem (addr);
+		gd->fb_base = addr;
+#endif
+	}
+#endif /* CONFIG_LCD */
+
+#if CONFIG_CMD_BSP
+	/* print any error messages of NVRAM reading */
+	NvEnableOutput(1);
+	NvPrintStatus();
+#endif  /* CONFIG_CMD_BSP */
 
 #ifdef CONFIG_VFD
 	/* must do this after the framebuffer is allocated */
 	drv_vfd_init();
 #endif /* CONFIG_VFD */
 
-#ifdef CONFIG_SERIAL_MULTI
-	serial_initialize();
-#endif
+#if CONFIG_CMD_BSP
+	/**
+	 * baudrate is being read from NvRAM. If one mirror image is wrong,
+	 * don't do any output yet in the default baudrate as we will switch
+	 * later to the second image.
+	 */
+	NvEnableOutput(0);
+#endif  /* CONFIG_CMD_BSP */
 
 	/* IP Address */
 	gd->bd->bi_ip_addr = getenv_IPaddr ("ipaddr");
+
+#if defined CONFIG_SPLASH_SCREEN && defined CONFIG_VIDEO_MX5 && !defined(CONFIG_CCIMX5X)
+	setup_splash_image();
+#endif
 
 	stdio_init ();	/* get the devices list going. */
 
@@ -437,6 +603,11 @@ extern void davinci_eth_set_mac_addr (const u_int8_t *addr);
 	}
 #endif /* CONFIG_DRIVER_SMC91111 || CONFIG_DRIVER_LAN91C96 */
 
+#if defined(CONFIG_ENC28J60_ETH) && !defined(CONFIG_ETHADDR)
+	extern void enc_set_mac_addr (void);
+	enc_set_mac_addr ();
+#endif /* CONFIG_ENC28J60_ETH && !CONFIG_ETHADDR*/
+
 	/* Initialize from environment */
 	if ((s = getenv ("loadaddr")) != NULL) {
 		load_addr = simple_strtoul (s, NULL, 16);
@@ -451,20 +622,34 @@ extern void davinci_eth_set_mac_addr (const u_int8_t *addr);
 	board_late_init ();
 #endif
 
-#ifdef CONFIG_GENERIC_MMC
-	puts ("MMC:   ");
-	mmc_initialize (gd->bd);
+#ifdef CONFIG_ANDROID_RECOVERY
+	check_recovery_mode();
 #endif
 
 #if defined(CONFIG_CMD_NET)
+#if defined(CONFIG_PLATFORM_HAS_HWID)
+	if (variant_has_ethernet())
+#endif
+	{
 #if defined(CONFIG_NET_MULTI)
-	puts ("Net:   ");
+		puts ("Net:   ");
 #endif
-	eth_initialize(gd->bd);
+		eth_initialize(gd->bd);
 #if defined(CONFIG_RESET_PHY_R)
-	debug ("Reset Ethernet PHY\n");
-	reset_phy();
+		debug ("Reset Ethernet PHY\n");
+		reset_phy();
 #endif
+	}
+#endif
+#ifdef CONFIG_AUTOLOAD_BOOTSCRIPT
+	run_auto_script();
+#endif
+#ifdef CONFIG_CMD_BSP
+	/* Enable output */
+	NvEnableOutput(1);
+#endif
+#ifdef BOARD_BEFORE_MLOOP_INIT
+	board_before_mloop_init ();
 #endif
 	/* main_loop() can return to retry autoboot, if so just run it again. */
 	for (;;) {

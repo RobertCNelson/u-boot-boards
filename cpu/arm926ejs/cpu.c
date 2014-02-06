@@ -32,6 +32,11 @@
 #include <common.h>
 #include <command.h>
 #include <asm/system.h>
+#include <asm/cache-cp15.h>
+
+#ifdef CONFIG_BOARD_CLEANUP_BEFORE_LINUX
+extern void board_cleanup_before_linux(void);
+#endif
 
 static void cache_flush(void);
 
@@ -46,6 +51,13 @@ int cleanup_before_linux (void)
 
 	disable_interrupts ();
 
+	/*
+	 * this function is called just before we call linux
+	 * it prepares the processor for linux
+	 */
+#ifdef CONFIG_BOARD_CLEANUP_BEFORE_LINUX
+	board_cleanup_before_linux();
+#endif
 
 	/* turn off I/D-cache */
 	icache_disable();

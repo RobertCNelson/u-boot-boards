@@ -73,7 +73,6 @@
  *	Next step:	none
  */
 
-
 #include <common.h>
 #include <watchdog.h>
 #include <command.h>
@@ -82,6 +81,9 @@
 #include "tftp.h"
 #include "rarp.h"
 #include "nfs.h"
+
+#define printf(args...)	PRINT_INFO(args)
+
 #ifdef CONFIG_STATUS_LED
 #include <status_led.h>
 #include <miiphy.h>
@@ -100,12 +102,20 @@
 
 DECLARE_GLOBAL_DATA_PTR;
 
+#ifndef	CONFIG_STARTAGAIN_TIMEOUT
+# define STARTAGAIN_TIMEOUT	5000UL
+#else
+# define STARTAGAIN_TIMEOUT	CONFIG_STARTAGAIN_TIMEOUT
+#endif
+
 #ifndef	CONFIG_ARP_TIMEOUT
 # define ARP_TIMEOUT		5000UL	/* Milliseconds before trying ARP again */
 #else
 # define ARP_TIMEOUT		CONFIG_ARP_TIMEOUT
 #endif
-
+#ifdef CONFIG_VARIABLE_ARP_TIMEOUT
+int arp_tout = CONFIG_INITIAL_ARP_TIMEOUT;
+#endif
 
 #ifndef	CONFIG_NET_RETRY_COUNT
 # define ARP_TIMEOUT_COUNT	5	/* # of timeouts before giving up  */
@@ -197,6 +207,9 @@ volatile uchar *NetTxPacket = 0;	/* THE transmit packet			*/
 
 static int net_check_prereq (proto_t protocol);
 
+int		NetSilent = 0;		/* Whether to silence the net commands output */
+extern int	TftpErrorCount;		/* The number of erroneous tries */
+unsigned long	NetStartAgainTimeout = STARTAGAIN_TIMEOUT;
 /**********************************************************************/
 
 IPaddr_t	NetArpWaitPacketIP;
@@ -237,7 +250,10 @@ void ArpRequest (void)
 	if ((NetArpWaitPacketIP & NetOurSubnetMask) !=
 	    (NetOurIP & NetOurSubnetMask)) {
 		if (NetOurGatewayIP == 0) {
-			puts ("## Warning: gatewayip needed but not set\n");
+#ifdef CONFIG_VARIABLE_ARP_TIMEOUT
+			if (NetArpWaitTry == 1)
+#endif
+			printf ("## Warning: gatewayip needed but not set\n");
 			NetArpWaitReplyIP = NetArpWaitPacketIP;
 		} else {
 			NetArpWaitReplyIP = NetOurGatewayIP;
@@ -260,11 +276,24 @@ void ArpTimeoutCheck(void)
 	t = get_timer(0);
 
 	/* check for arp timeout */
+#ifdef CONFIG_VARIABLE_ARP_TIMEOUT
+	if ((t - NetArpWaitTimerStart) > arp_tout) {
+#else
 	if ((t - NetArpWaitTimerStart) > ARP_TIMEOUT) {
+#endif
 		NetArpWaitTry++;
 
 		if (NetArpWaitTry >= ARP_TIMEOUT_COUNT) {
-			puts ("\nARP Retry count exceeded; starting again\n");
+#ifdef CONFIG_VARIABLE_ARP_TIMEOUT
+			if (arp_tout == CONFIG_INITIAL_ARP_TIMEOUT) {
+				/* skip reprinting gateway needed */
+				NetArpWaitTry = 2;
+				NetArpWaitTimerStart = t;
+				ArpRequest();
+				return;
+			}
+#endif
+			printf ("\nARP Retry count exceeded; starting again\n");
 			NetArpWaitTry = 0;
 			NetStartAgain();
 		} else {
@@ -307,6 +336,7 @@ int
 NetLoop(proto_t protocol)
 {
 	bd_t *bd = gd->bd;
+	ulong now;
 
 #ifdef CONFIG_NET_MULTI
 	NetRestarted = 0;
@@ -479,7 +509,7 @@ restart:
 		 */
 		if (ctrlc()) {
 			eth_halt();
-			puts ("\nAbort\n");
+			printf ("\nAbort\n");
 			return (-1);
 		}
 
@@ -487,9 +517,11 @@ restart:
 
 		/*
 		 *	Check for a timeout, and run the timeout handler
-		 *	if we have one.
+		 *	if we have one. Check if now is bigger than timeStart
+		 *	to avoid problems with timer overflows.
 		 */
-		if (timeHandler && ((get_timer(0) - timeStart) > timeDelta)) {
+		now = get_timer(0);
+		if (timeHandler && (now > timeStart) && ((now - timeStart) > timeDelta)) {
 			thand_f *x;
 
 #if defined(CONFIG_MII) || defined(CONFIG_CMD_MII)
@@ -560,6 +592,9 @@ void NetStartAgain (void)
 	char *nretry;
 	int noretry = 0, once = 0;
 
+#ifdef CONFIG_VARIABLE_ARP_TIMEOUT
+	arp_tout = CONFIG_INITIAL_ARP_TIMEOUT;
+#endif
 	if ((nretry = getenv ("netretry")) != NULL) {
 		noretry = (strcmp (nretry, "no") == 0);
 		once = (strcmp (nretry, "once") == 0);
@@ -570,7 +605,7 @@ void NetStartAgain (void)
 		return;
 	}
 #ifndef CONFIG_NET_MULTI
-	NetSetTimeout (10000UL, startAgainTimeout);
+	NetSetTimeout (NetStartAgainTimeout, startAgainTimeout);
 	NetSetHandler (startAgainHandler);
 #else	/* !CONFIG_NET_MULTI*/
 	eth_halt ();
@@ -581,7 +616,7 @@ void NetStartAgain (void)
 	if (NetRestartWrap) {
 		NetRestartWrap = 0;
 		if (NetDevExists && !once) {
-			NetSetTimeout (10000UL, startAgainTimeout);
+			NetSetTimeout (NetStartAgainTimeout, startAgainTimeout);
 			NetSetHandler (startAgainHandler);
 		} else {
 			NetState = NETLOOP_FAIL;
@@ -751,7 +786,7 @@ static void PingStart(void)
 #if defined(CONFIG_NET_MULTI)
 	printf ("Using %s device\n", eth_get_name());
 #endif	/* CONFIG_NET_MULTI */
-	NetSetTimeout (10000UL, PingTimeout);
+	NetSetTimeout (NetStartAgainTimeout, PingTimeout);
 	NetSetHandler (PingHandler);
 
 	PingSend();
@@ -1222,8 +1257,9 @@ NetReceive(volatile uchar * inpkt, int len)
 		 *   address; so if we receive such a packet, we set
 		 *   the server ethernet address
 		 */
-		debug("Got ARP\n");
-
+#ifdef ET_DEBUG
+		printf ("Got ARP\n");
+#endif
 		arp = (ARP_t *)ip;
 		if (len < ARP_HDR_SIZE) {
 			printf("bad length %d < %d\n", len, ARP_HDR_SIZE);
@@ -1252,7 +1288,9 @@ NetReceive(volatile uchar * inpkt, int len)
 
 		switch (ntohs(arp->ar_op)) {
 		case ARPOP_REQUEST:		/* reply with our IP address	*/
-			debug("Got ARP REQUEST, return our IP\n");
+#ifdef ET_DEBUG
+			printf ("Got ARP REQUEST, return our IP\n");
+#endif
 			pkt = (uchar *)et;
 			pkt += NetSetEther(pkt, et->et_src, PROT_ARP);
 			arp->ar_op = htons(ARPOP_REPLY);
@@ -1283,7 +1321,9 @@ NetReceive(volatile uchar * inpkt, int len)
 
 			/* matched waiting packet's address */
 			if (tmp == NetArpWaitReplyIP) {
-				debug("Got it\n");
+#ifdef ET_DEBUG
+				printf ("Got it\n");
+#endif
 				/* save address for later use */
 				memcpy(NetArpWaitPacketMAC, &arp->ar_data[0], 6);
 
@@ -1308,7 +1348,9 @@ NetReceive(volatile uchar * inpkt, int len)
 		break;
 
 	case PROT_RARP:
-		debug("Got RARP\n");
+#ifdef ET_DEBUG
+		printf ("Got RARP\n");
+#endif
 		arp = (ARP_t *)ip;
 		if (len < ARP_HDR_SIZE) {
 			printf("bad length %d < %d\n", len, ARP_HDR_SIZE);
@@ -1320,7 +1362,7 @@ NetReceive(volatile uchar * inpkt, int len)
 			(ntohs(arp->ar_pro) != PROT_IP)     ||
 			(arp->ar_hln != 6) || (arp->ar_pln != 4)) {
 
-			puts ("invalid RARP header\n");
+			printf ("invalid RARP header\n");
 		} else {
 			NetCopyIP(&NetOurIP,    &arp->ar_data[16]);
 			if (NetServerIP == 0)
@@ -1332,7 +1374,9 @@ NetReceive(volatile uchar * inpkt, int len)
 		break;
 
 	case PROT_IP:
-		debug("Got IP\n");
+#ifdef ET_DEBUG
+		printf ("Got IP\n");
+#endif
 		if (len < IP_HDR_SIZE) {
 			debug("len bad %d < %lu\n", len, (ulong)IP_HDR_SIZE);
 			return;
@@ -1356,7 +1400,7 @@ NetReceive(volatile uchar * inpkt, int len)
 			return;
 		}
 		if (!NetCksumOk((uchar *)ip, IP_HDR_SIZE_NO_UDP / 2)) {
-			puts ("checksum bad\n");
+			printf ("checksum bad\n");
 			return;
 		}
 		tmp = NetReadIP(&ip->ip_dst);
@@ -1496,7 +1540,7 @@ static int net_check_prereq (proto_t protocol)
 #if defined(CONFIG_CMD_PING)
 	case PING:
 		if (NetPingIP == 0) {
-			puts ("*** ERROR: ping address not given\n");
+			printf ("*** ERROR: ping address not given\n");
 			return (1);
 		}
 		goto common;
@@ -1504,7 +1548,7 @@ static int net_check_prereq (proto_t protocol)
 #if defined(CONFIG_CMD_SNTP)
 	case SNTP:
 		if (NetNtpServerIP == 0) {
-			puts ("*** ERROR: NTP server address not given\n");
+			printf ("*** ERROR: NTP server address not given\n");
 			return (1);
 		}
 		goto common;
@@ -1523,7 +1567,7 @@ static int net_check_prereq (proto_t protocol)
 	case NETCONS:
 	case TFTP:
 		if (NetServerIP == 0) {
-			puts ("*** ERROR: `serverip' not set\n");
+			printf ("*** ERROR: `serverip' not set\n");
 			return (1);
 		}
 #if defined(CONFIG_CMD_PING) || defined(CONFIG_CMD_SNTP)
@@ -1531,7 +1575,7 @@ static int net_check_prereq (proto_t protocol)
 #endif
 
 		if (NetOurIP == 0) {
-			puts ("*** ERROR: `ipaddr' not set\n");
+			printf ("*** ERROR: `ipaddr' not set\n");
 			return (1);
 		}
 		/* Fall through */
@@ -1547,10 +1591,10 @@ static int net_check_prereq (proto_t protocol)
 
 			switch (num) {
 			case -1:
-				puts ("*** ERROR: No ethernet found.\n");
+				printf ("*** ERROR: No ethernet found.\n");
 				return (1);
 			case 0:
-				puts ("*** ERROR: `ethaddr' not set\n");
+				printf ("*** ERROR: `ethaddr' not set\n");
 				break;
 			default:
 				printf ("*** ERROR: `eth%daddr' not set\n",
@@ -1561,7 +1605,7 @@ static int net_check_prereq (proto_t protocol)
 			NetStartAgain ();
 			return (2);
 #else
-			puts ("*** ERROR: `ethaddr' not set\n");
+			printf ("*** ERROR: `ethaddr' not set\n");
 			return (1);
 #endif
 		}

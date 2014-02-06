@@ -50,6 +50,20 @@ extern struct serial_device zoom2_serial_device2;
 extern struct serial_device zoom2_serial_device3;
 #endif
 
+#if defined(CONFIG_MX51) || defined(CONFIG_MX51_3DS) || defined(CONFIG_CCIMX51)
+#define	MXC_MAX_UARTS	 3
+extern struct serial_device serial_mxc_devices[MXC_MAX_UARTS];
+#endif
+#if defined(CONFIG_CCIMX53)
+#define	MXC_MAX_UARTS	 5
+extern struct serial_device serial_mxc_devices[MXC_MAX_UARTS];
+#endif
+#if defined(CONFIG_MX28)
+extern struct serial_device serial_mxs_duart_device;
+#define MXS_MAX_AUARTS	5
+extern struct serial_device serial_mxs_auart_devices[MXS_MAX_AUARTS];
+#endif
+
 extern struct serial_device serial_ffuart_device;
 extern struct serial_device serial_btuart_device;
 extern struct serial_device serial_stuart_device;

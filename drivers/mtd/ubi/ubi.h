@@ -58,14 +58,41 @@
 /* UBI name used for character devices, sysfs, etc */
 #define UBI_NAME_STR "ubi"
 
+#if defined(CONFIG_CCIMX5X) || defined(CONFIG_CCARDIMX28)
+extern int ubi_silent;
 /* Normal UBI messages */
-#define ubi_msg(fmt, ...) printk(KERN_NOTICE "UBI: " fmt "\n", ##__VA_ARGS__)
+# define ubi_msg(fmt, ...) \
+		do { \
+			if ( !ubi_silent ) { \
+				printk(KERN_NOTICE "UBI: " fmt "\n", ##__VA_ARGS__); \
+			} \
+		} while ( 0 )
 /* UBI warning messages */
-#define ubi_warn(fmt, ...) printk(KERN_WARNING "UBI warning: %s: " fmt "\n", \
+# define ubi_warn(fmt, ...) \
+		do { \
+			if ( !ubi_silent ) { \
+				printk(KERN_WARNING "UBI warning: %s: " fmt "\n", \
+					__func__, ##__VA_ARGS__); \
+			} \
+		} while  ( 0 )
+/* UBI error messages */
+# define ubi_err(fmt, ...) \
+		do { \
+			if ( !ubi_silent ) { \
+				printk(KERN_ERR "UBI error: %s: " fmt "\n", \
+					__func__, ##__VA_ARGS__); \
+			} \
+		} while ( 0 )
+#else
+/* Normal UBI messages */
+# define ubi_msg(fmt, ...) printk(KERN_NOTICE "UBI: " fmt "\n", ##__VA_ARGS__)
+/* UBI warning messages */
+# define ubi_warn(fmt, ...) printk(KERN_WARNING "UBI warning: %s: " fmt "\n", \
 				  __func__, ##__VA_ARGS__)
 /* UBI error messages */
-#define ubi_err(fmt, ...) printk(KERN_ERR "UBI error: %s: " fmt "\n", \
+# define ubi_err(fmt, ...) printk(KERN_ERR "UBI error: %s: " fmt "\n", \
 				 __func__, ##__VA_ARGS__)
+#endif
 
 /* Lowest number PEBs reserved for bad PEB handling */
 #define MIN_RESEVED_PEBS 2
@@ -448,6 +475,9 @@ void ubi_free_volume(struct ubi_device *ubi, struct ubi_volume *vol);
 /* upd.c */
 int ubi_start_update(struct ubi_device *ubi, struct ubi_volume *vol,
 		     long long bytes);
+# ifdef CONFIG_CMD_BSP
+int ubi_break_update(struct ubi_device *ubi, struct ubi_volume *vol);
+#endif
 int ubi_more_update_data(struct ubi_device *ubi, struct ubi_volume *vol,
 			 const void __user *buf, int count);
 int ubi_start_leb_change(struct ubi_device *ubi, struct ubi_volume *vol,
@@ -486,7 +516,6 @@ int ubi_eba_atomic_leb_change(struct ubi_device *ubi, struct ubi_volume *vol,
 int ubi_eba_copy_leb(struct ubi_device *ubi, int from, int to,
 		     struct ubi_vid_hdr *vid_hdr);
 int ubi_eba_init_scan(struct ubi_device *ubi, struct ubi_scan_info *si);
-void ubi_eba_close(const struct ubi_device *ubi);
 
 /* wl.c */
 int ubi_wl_get_peb(struct ubi_device *ubi, int dtype);

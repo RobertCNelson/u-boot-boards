@@ -69,7 +69,6 @@ static struct usb_device usb_dev[USB_MAX_DEVICE];
 static int dev_index;
 static int running;
 static int asynch_allowed;
-static struct devrequest setup_packet;
 
 char usb_started; /* flag for the started/stopped USB status */
 
@@ -177,23 +176,25 @@ int usb_control_msg(struct usb_device *dev, unsigned int pipe,
 			unsigned short value, unsigned short index,
 			void *data, unsigned short size, int timeout)
 {
+	ALLOC_CACHE_ALIGN_BUFFER(struct devrequest, setup_packet, 1);
+
 	if ((timeout == 0) && (!asynch_allowed)) {
 		/* request for a asynch control pipe is not allowed */
 		return -1;
 	}
 
 	/* set setup command */
-	setup_packet.requesttype = requesttype;
-	setup_packet.request = request;
-	setup_packet.value = cpu_to_le16(value);
-	setup_packet.index = cpu_to_le16(index);
-	setup_packet.length = cpu_to_le16(size);
+	setup_packet->requesttype = requesttype;
+	setup_packet->request = request;
+	setup_packet->value = cpu_to_le16(value);
+	setup_packet->index = cpu_to_le16(index);
+	setup_packet->length = cpu_to_le16(size);
 	USB_PRINTF("usb_control_msg: request: 0x%X, requesttype: 0x%X, " \
 		   "value 0x%X index 0x%X length 0x%X\n",
 		   request, requesttype, value, index, size);
 	dev->status = USB_ST_NOT_PROC; /*not yet processed */
 
-	submit_control_msg(dev, pipe, data, size, &setup_packet);
+	submit_control_msg(dev, pipe, data, size, setup_packet);
 	if (timeout == 0)
 		return (int)size;
 
@@ -299,8 +300,8 @@ int usb_set_maxpacket(struct usb_device *dev)
 {
 	int i, ii;
 
-	for (i = 0; i < dev->config.bNumInterfaces; i++)
-		for (ii = 0; ii < dev->config.if_desc[i].bNumEndpoints; ii++)
+	for (i = 0; i < dev->config.desc.bNumInterfaces; i++)
+		for (ii = 0; ii < dev->config.if_desc[i].desc.bNumEndpoints; ii++)
 			usb_set_maxpacket_ep(dev,
 					  &dev->config.if_desc[i].ep_desc[ii]);
 
@@ -330,14 +331,14 @@ int usb_parse_config(struct usb_device *dev, unsigned char *buffer, int cfgno)
 		return -1;
 	}
 	memcpy(&dev->config, buffer, buffer[0]);
-	le16_to_cpus(&(dev->config.wTotalLength));
+	le16_to_cpus(&(dev->config.desc.wTotalLength));
 	dev->config.no_of_if = 0;
 
-	index = dev->config.bLength;
+	index = dev->config.desc.bLength;
 	/* Ok the first entry must be a configuration entry,
 	 * now process the others */
 	head = (struct usb_descriptor_header *) &buffer[index];
-	while (index + 1 < dev->config.wTotalLength) {
+	while (index + 1 < dev->config.desc.wTotalLength) {
 		switch (head->bDescriptorType) {
 		case USB_DT_INTERFACE:
 			if (((struct usb_interface_descriptor *) \
@@ -350,7 +351,7 @@ int usb_parse_config(struct usb_device *dev, unsigned char *buffer, int cfgno)
 				dev->config.if_desc[ifno].no_of_ep = 0;
 				dev->config.if_desc[ifno].num_altsetting = 1;
 				curr_if_num =
-				     dev->config.if_desc[ifno].bInterfaceNumber;
+				     dev->config.if_desc[ifno].desc.bInterfaceNumber;
 			} else {
 				/* found alternate setting for the interface */
 				dev->config.if_desc[ifno].num_altsetting++;
@@ -440,10 +441,9 @@ int usb_get_configuration_no(struct usb_device *dev,
 {
 	int result;
 	unsigned int tmp;
-	struct usb_config_descriptor *config;
+	struct usb_configuration_descriptor *config;
 
-
-	config = (struct usb_config_descriptor *)&buffer[0];
+	config = (struct usb_configuration_descriptor *)&buffer[0];
 	result = usb_get_descriptor(dev, USB_DT_CONFIG, cfgno, buffer, 9);
 	if (result < 9) {
 		if (result < 0)
@@ -489,11 +489,11 @@ int usb_set_address(struct usb_device *dev)
  */
 int usb_set_interface(struct usb_device *dev, int interface, int alternate)
 {
-	struct usb_interface_descriptor *if_face = NULL;
+	struct usb_interface *if_face = NULL;
 	int ret, i;
 
-	for (i = 0; i < dev->config.bNumInterfaces; i++) {
-		if (dev->config.if_desc[i].bInterfaceNumber == interface) {
+	for (i = 0; i < dev->config.desc.bNumInterfaces; i++) {
+		if (dev->config.if_desc[i].desc.bInterfaceNumber == interface) {
 			if_face = &dev->config.if_desc[i];
 			break;
 		}
@@ -666,7 +666,7 @@ static int usb_string_sub(struct usb_device *dev, unsigned int langid,
  */
 int usb_string(struct usb_device *dev, int index, char *buf, size_t size)
 {
-	unsigned char mybuf[USB_BUFSIZ];
+	ALLOC_CACHE_ALIGN_BUFFER(unsigned char, mybuf, USB_BUFSIZ);
 	unsigned char *tbuf;
 	int err;
 	unsigned int u, idx;
@@ -766,7 +766,7 @@ int usb_new_device(struct usb_device *dev)
 {
 	int addr, err;
 	int tmp;
-	unsigned char tmpbuf[USB_BUFSIZ];
+	ALLOC_CACHE_ALIGN_BUFFER(unsigned char, tmpbuf, USB_BUFSIZ);
 
 	/* We still haven't set the Address yet */
 	addr = dev->devnum;
@@ -893,11 +893,11 @@ int usb_new_device(struct usb_device *dev)
 	le16_to_cpus(&dev->descriptor.idProduct);
 	le16_to_cpus(&dev->descriptor.bcdDevice);
 	/* only support for one config for now */
-	usb_get_configuration_no(dev, &tmpbuf[0], 0);
-	usb_parse_config(dev, &tmpbuf[0], 0);
+	usb_get_configuration_no(dev, tmpbuf, 0);
+	usb_parse_config(dev, tmpbuf, 0);
 	usb_set_maxpacket(dev);
 	/* we set the default configuration here */
-	if (usb_set_configuration(dev, dev->config.bConfigurationValue)) {
+	if (usb_set_configuration(dev, dev->config.desc.bConfigurationValue)) {
 		printf("failed to set default configuration " \
 			"len %d, status %lX\n", dev->act_len, dev->status);
 		return -1;
@@ -1057,7 +1057,7 @@ static int hub_port_reset(struct usb_device *dev, int port,
 			unsigned short *portstat)
 {
 	int tries;
-	struct usb_port_status portsts;
+	ALLOC_CACHE_ALIGN_BUFFER(struct usb_port_status, portsts, 1);
 	unsigned short portstatus, portchange;
 
 	USB_HUB_PRINTF("hub_port_reset: resetting port %d...\n", port);
@@ -1066,13 +1066,13 @@ static int hub_port_reset(struct usb_device *dev, int port,
 		usb_set_port_feature(dev, port + 1, USB_PORT_FEAT_RESET);
 		wait_ms(200);
 
-		if (usb_get_port_status(dev, port + 1, &portsts) < 0) {
+		if (usb_get_port_status(dev, port + 1, portsts) < 0) {
 			USB_HUB_PRINTF("get_port_status failed status %lX\n",
 					dev->status);
 			return -1;
 		}
-		portstatus = le16_to_cpu(portsts.wPortStatus);
-		portchange = le16_to_cpu(portsts.wPortChange);
+		portstatus = le16_to_cpu(portsts->wPortStatus);
+		portchange = le16_to_cpu(portsts->wPortChange);
 
 		USB_HUB_PRINTF("portstatus %x, change %x, %s\n",
 				portstatus, portchange,
@@ -1110,17 +1110,17 @@ static int hub_port_reset(struct usb_device *dev, int port,
 void usb_hub_port_connect_change(struct usb_device *dev, int port)
 {
 	struct usb_device *usb;
-	struct usb_port_status portsts;
+	ALLOC_CACHE_ALIGN_BUFFER(struct usb_port_status, portsts, 1);
 	unsigned short portstatus, portchange;
 
 	/* Check status */
-	if (usb_get_port_status(dev, port + 1, &portsts) < 0) {
+	if (usb_get_port_status(dev, port + 1, portsts) < 0) {
 		USB_HUB_PRINTF("get_port_status failed\n");
 		return;
 	}
 
-	portstatus = le16_to_cpu(portsts.wPortStatus);
-	portchange = le16_to_cpu(portsts.wPortChange);
+	portstatus = le16_to_cpu(portsts->wPortStatus);
+	portchange = le16_to_cpu(portsts->wPortChange);
 	USB_HUB_PRINTF("portstatus %x, change %x, %s\n",
 			portstatus, portchange, portspeed(portstatus));
 
@@ -1168,7 +1168,8 @@ void usb_hub_port_connect_change(struct usb_device *dev, int port)
 
 int usb_hub_configure(struct usb_device *dev)
 {
-	unsigned char buffer[USB_BUFSIZ], *bitmap;
+	ALLOC_CACHE_ALIGN_BUFFER(unsigned char, buffer, USB_BUFSIZ);
+	unsigned char *bitmap;
 	struct usb_hub_descriptor *descriptor;
 	struct usb_hub_status *hubsts;
 	int i;
@@ -1287,16 +1288,16 @@ int usb_hub_configure(struct usb_device *dev)
 	usb_hub_power_on(hub);
 
 	for (i = 0; i < dev->maxchild; i++) {
-		struct usb_port_status portsts;
+		ALLOC_CACHE_ALIGN_BUFFER(struct usb_port_status, portsts, 1);
 		unsigned short portstatus, portchange;
 
-		if (usb_get_port_status(dev, i + 1, &portsts) < 0) {
+		if (usb_get_port_status(dev, i + 1, portsts) < 0) {
 			USB_HUB_PRINTF("get_port_status failed\n");
 			continue;
 		}
 
-		portstatus = le16_to_cpu(portsts.wPortStatus);
-		portchange = le16_to_cpu(portsts.wPortChange);
+		portstatus = le16_to_cpu(portsts->wPortStatus);
+		portchange = le16_to_cpu(portsts->wPortChange);
 		USB_HUB_PRINTF("Port %d Status %X Change %X\n",
 				i + 1, portstatus, portchange);
 
@@ -1347,21 +1348,21 @@ int usb_hub_configure(struct usb_device *dev)
 
 int usb_hub_probe(struct usb_device *dev, int ifnum)
 {
-	struct usb_interface_descriptor *iface;
+	struct usb_interface *iface;
 	struct usb_endpoint_descriptor *ep;
 	int ret;
 
 	iface = &dev->config.if_desc[ifnum];
 	/* Is it a hub? */
-	if (iface->bInterfaceClass != USB_CLASS_HUB)
+	if (iface->desc.bInterfaceClass != USB_CLASS_HUB)
 		return 0;
 	/* Some hubs have a subclass of 1, which AFAICT according to the */
 	/*  specs is not defined, but it works */
-	if ((iface->bInterfaceSubClass != 0) &&
-	    (iface->bInterfaceSubClass != 1))
+	if ((iface->desc.bInterfaceSubClass != 0) &&
+	    (iface->desc.bInterfaceSubClass != 1))
 		return 0;
 	/* Multiple endpoints? What kind of mutant ninja-hub is this? */
-	if (iface->bNumEndpoints != 1)
+	if (iface->desc.bNumEndpoints != 1)
 		return 0;
 	ep = &iface->ep_desc[0];
 	/* Output endpoint? Curiousier and curiousier.. */

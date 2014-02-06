@@ -148,6 +148,9 @@ int mk_date (char *datestr, struct rtc_time *tmp)
 		if (cnvrt2 (ptr, &sec))
 			return (-1);
 
+		if (sec > 59)
+			return (-1);
+
 		tmp->tm_sec = sec;
 	} else {
 		tmp->tm_sec = 0;
