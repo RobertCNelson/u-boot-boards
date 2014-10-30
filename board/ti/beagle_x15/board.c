@@ -44,27 +44,27 @@ void emif_get_dmm_regs(const struct dmm_lisa_map_regs **dmm_lisa_regs)
 }
 
 static const struct emif_regs beagle_x15_ddr3_532mhz_emif_regs = {
-	.sdram_config_init	= 0x61851B32, /* dont know what to do about this */
-	.sdram_config		= 0x61851B32,
+	.sdram_config_init	= 0x61851ab2,
+	.sdram_config		= 0x61851ab2,
 	.sdram_config2		= 0x00000000,
 	.ref_ctrl		= 0x00001035,
-	.sdram_tim1		= 0xCEEF266B,
-	.sdram_tim2		= 0x328F7FDA,
-	.sdram_tim3		= 0x027F88A8,
-	.read_idle_ctrl		= 0x00050001, /* not sure where in gel file */
-	.zq_config		= 0x0007190B,
+	.sdram_tim1		= 0xcccf36b3,
+	.sdram_tim2		= 0x308f7fda,
+	.sdram_tim3		= 0x027f88a8,
+	.read_idle_ctrl		= 0x00050001,
+	.zq_config		= 0x1007190b,
 	.temp_alert_config	= 0x00000000,
-	.emif_ddr_phy_ctlr_1_init = 0x0E24400A, /* not sure what to do about this */
-	.emif_ddr_phy_ctlr_1	= 0x0E24400A, /* based on non hw level enabled */
-	.emif_ddr_ext_phy_ctrl_1 = 0x10040100, /* not sure wherein gel file */
-	.emif_ddr_ext_phy_ctrl_2 = 0x00740074,
-	.emif_ddr_ext_phy_ctrl_3 = 0x00780078,
-	.emif_ddr_ext_phy_ctrl_4 = 0x007c007c,
-	.emif_ddr_ext_phy_ctrl_5 = 0x007b007b,
+	.emif_ddr_phy_ctlr_1_init = 0x0e24400a,
+	.emif_ddr_phy_ctlr_1	= 0x0e24400a,
+	.emif_ddr_ext_phy_ctrl_1 = 0x10040100,
+	.emif_ddr_ext_phy_ctrl_2 = 0x00bb00bb,
+	.emif_ddr_ext_phy_ctrl_3 = 0x00bb00bb,
+	.emif_ddr_ext_phy_ctrl_4 = 0x00bb00bb,
+	.emif_ddr_ext_phy_ctrl_5 = 0x00bb00bb,
 	.emif_rd_wr_lvl_rmp_win	= 0x00000000,
-	.emif_rd_wr_lvl_rmp_ctl	= 0x00000000, /* based on non hw level enabled */
-	.emif_rd_wr_lvl_ctl	= 0x00000000, /* not sure where based in gel file */
-	.emif_rd_wr_exec_thresh	= 0x00000305
+	.emif_rd_wr_lvl_rmp_ctl	= 0x00000000,
+	.emif_rd_wr_lvl_ctl	= 0x00000000,
+	.emif_rd_wr_exec_thresh	= 0x40000305
 };
 
 void emif_get_reg_dump(u32 emif_nr, const struct emif_regs **regs)
@@ -73,37 +73,36 @@ void emif_get_reg_dump(u32 emif_nr, const struct emif_regs **regs)
 }
 
 static const u32 beagle_x15_ddr3_ext_phy_ctrl_const_regs[] = {
-	0x00800080, // 6
+	0x00bb00bb,
 
+	0x00440044,
+	0x00440044,
+	0x00440044,
+	0x00440044,
+	0x00440044,
 
-	0x00360036, // 7
-	0x00340034, // 8
-	0x00360036, // 9
-	0x00350035, // 10
-	0x00350035, // 11
+	0x007f007f,
+	0x007f007f,
+	0x007f007f,
+	0x007f007f,
+	0x007f007f,
 
-	0x01ff01ff, // 12
-	0x01ff01ff,
-	0x01ff01ff,
-	0x01ff01ff,
-	0x01ff01ff,
-
-	0x00430043,
-	0x003e003e,
-	0x004a004a,
-	0x00470047,
-	0x00400040,
+	0x00600060,
+	0x00600060,
+	0x00600060,
+	0x00600060,
+	0x00600060,
 
 	0x00000000,
 	0x00600020,
 	0x40010080,
 	0x08102040,
 
-	0x00400040,
-	0x00400040,
-	0x00400040,
-	0x00400040,
-	0x00400040
+	0x00000000,
+	0x00000000,
+	0x00000000,
+	0x00000000,
+	0x00000000
 };
 
 void emif_get_ext_phy_ctrl_const_regs(u32 emif_nr, const u32 **regs, u32 *size)
