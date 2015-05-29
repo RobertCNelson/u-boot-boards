@@ -34,6 +34,8 @@
 #define PHYS_OFFSET	ALT_SDRAM_BASE
 #elif defined(SILK_SDRAM_BASE)
 #define PHYS_OFFSET	SILK_SDRAM_BASE
+#elif R8A7790STOUT_SDRAM_BASE
+#define PHYS_OFFSET	R8A7790STOUT_SDRAM_BASE
 #else
 #error
 #endif
@@ -42,7 +44,7 @@
 
 static u32 usb_base_address[CONFIG_USB_MAX_CONTROLLER_COUNT] = {
 	0xee080000,	/* USB0 (EHCI) */
-#ifdef CONFIG_MACH_LAGER
+#if defined(CONFIG_MACH_LAGER) || defined(CONFIG_MACH_R8A7790STOUT)
 	0xee0a0000,	/* USB1 */
 #endif
 	0xee0c0000,	/* USB2 */
