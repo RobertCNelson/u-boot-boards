@@ -42,6 +42,18 @@
 
 #define SMSTPCR703      0x08
 
+#if defined(CONFIG_USB_PHY_RMOBILE)
+/* USB General control register 2 (UGCTRL2) */
+#define USBHS_UGCTRL2_USB2SEL		(0x1 << 31)
+#define USBHS_UGCTRL2_USB2SEL_PCI	0
+#define USBHS_UGCTRL2_USB2SEL_USB30	(1 << 31)
+#define USBHS_UGCTRL2_USB0SEL		(0x3 << 4)
+#define USBHS_UGCTRL2_USB0SEL_PCI	(1 << 4)
+#define USBHS_UGCTRL2_USB0SEL_HS_USB	(3 << 4)
+extern void rmobile_usb_phy_init(int mask, int value);
+extern void rmobile_usb_phy_exit(void);
+#endif
+
 static u32 usb_base_address[CONFIG_USB_MAX_CONTROLLER_COUNT] = {
 	0xee080000,	/* USB0 (EHCI) */
 #if defined(CONFIG_MACH_LAGER) || defined(CONFIG_MACH_R8A7790STOUT)
@@ -80,6 +92,12 @@ int ehci_hcd_stop(int index)
 		writel(data, SMSTPCR7);
 	}
 
+#if defined(CONFIG_USB_PHY_RMOBILE)
+	if (index == (CONFIG_USB_MAX_CONTROLLER_COUNT-1)) {
+		rmobile_usb_phy_exit();
+	}
+#endif
+
 	return 0;
 }
 
@@ -90,6 +108,13 @@ int ehci_hcd_init(int index, struct ehci_hccr **hccr, struct ehci_hcor **hcor)
 	u32 phys_base;
 	struct rmobile_ehci_reg *rehci;
 	uint32_t cap_base;
+
+#if defined(CONFIG_USB_PHY_RMOBILE)
+	if (index == 0) {
+		rmobile_usb_phy_init(USBHS_UGCTRL2_USB0SEL, USBHS_UGCTRL2_USB0SEL_PCI);
+		rmobile_usb_phy_init(USBHS_UGCTRL2_USB2SEL, USBHS_UGCTRL2_USB2SEL_PCI);
+	}
+#endif
 
 	base = usb_base_address[index];
 	phys_base = base;
