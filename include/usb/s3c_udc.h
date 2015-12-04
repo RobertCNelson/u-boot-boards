@@ -18,6 +18,6 @@ struct dwc2_plat_otg_data {
 	unsigned int	usb_gusbcfg;
 };
 
-int s3c_udc_probe(struct dwc2_plat_otg_data *pdata);
+int dwc2_udc_probe(struct dwc2_plat_otg_data *pdata);
 
 #endif
