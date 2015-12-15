@@ -69,6 +69,10 @@
 #define CONFIG_CMDLINE_EDITING			/* Command history etc */
 #define CONFIG_SYS_HUSH_PARSER
 
+#ifndef CONFIG_SYS_HOSTNAME
+#define CONFIG_SYS_HOSTNAME	CONFIG_SYS_BOARD
+#endif
+
 /*
  * Cache
  */
@@ -229,13 +233,6 @@ unsigned int cm_get_qspi_controller_clk_hz(void);
 #ifdef CONFIG_CMD_USB
 #define CONFIG_USB_DWC2
 #define CONFIG_USB_STORAGE
-/*
- * NOTE: User must define either of the following to select which
- *       of the two USB controllers available on SoCFPGA to use.
- *       The DWC2 driver doesn't support multiple USB controllers.
- * #define CONFIG_USB_DWC2_REG_ADDR	SOCFPGA_USB0_ADDRESS
- * #define CONFIG_USB_DWC2_REG_ADDR	SOCFPGA_USB1_ADDRESS
- */
 #endif
 
 /*
@@ -243,7 +240,7 @@ unsigned int cm_get_qspi_controller_clk_hz(void);
  */
 #if defined(CONFIG_CMD_DFU) || defined(CONFIG_CMD_USB_MASS_STORAGE)
 #define CONFIG_USB_GADGET
-#define CONFIG_USB_GADGET_S3C_UDC_OTG
+#define CONFIG_USB_GADGET_DWC2_OTG
 #define CONFIG_USB_GADGET_DUALSPEED
 #define CONFIG_USB_GADGET_VBUS_DRAW	2
 
@@ -262,7 +259,7 @@ unsigned int cm_get_qspi_controller_clk_hz(void);
 #define CONFIG_G_DNL_UMS_VENDOR_NUM	CONFIG_G_DNL_VENDOR_NUM
 #define CONFIG_G_DNL_UMS_PRODUCT_NUM	CONFIG_G_DNL_PRODUCT_NUM
 #ifndef CONFIG_G_DNL_MANUFACTURER
-#define CONFIG_G_DNL_MANUFACTURER	"Altera"
+#define CONFIG_G_DNL_MANUFACTURER	CONFIG_SYS_VENDOR
 #endif
 #endif
 
