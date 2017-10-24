@@ -53,6 +53,9 @@
 #define CONFIG_CMD_EXT4_WRITE
 #define CONFIG_CMD_SF
 #define CONFIG_CMD_SPI
+#define CONFIG_CMD_ECHO
+#define CONFIG_CMD_FS_GENERIC			/* Generic load commands */
+#define CONFIG_SUPPORT_RAW_INITRD		/* bootz raw initrd support */
 
 #define CONFIG_CMDLINE_TAG
 #define CONFIG_SETUP_MEMORY_TAGS
@@ -63,7 +66,7 @@
 #define BOARD_LATE_INIT
 
 #define CONFIG_BAUDRATE		38400
-#define CONFIG_BOOTDELAY	3
+#define CONFIG_BOOTDELAY	1
 #define CONFIG_BOOTARGS		""
 
 #define CONFIG_VERSION_VARIABLE
@@ -151,6 +154,34 @@
 #define CONFIG_EXTRA_ENV_SETTINGS \
 	"bootm_low=0x40e00000\0" \
 	"bootm_size=0x100000\0" \
+	"loadaddr=0x42000000\0" \
+	"fdtaddr=0x48000000\0" \
+	"fdtfile=r8a7791-porter.dtb\0" \
+	"console=ttySC0,38400\0" \
+	"optargs=\0" \
+	"mmcdev=1\0" \
+	"mmcroot=/dev/mmcblk0p1 ro\0" \
+	"mmcrootfstype=ext4 rootwait\0" \
+	"mmcargs=setenv bootargs console=${console} " \
+		"${optargs} " \
+		"root=${mmcroot} " \
+		"rootfstype=${mmcrootfstype}\0" \
+	"loadximage=load mmc 1:1 ${loadaddr} /boot/vmlinuz-${uname_r}\0" \
+	"loadxfdt=load mmc 1:1 ${fdtaddr} /boot/dtbs/${uname_r}/${fdtfile}\0" \
+	"loadxrd=load mmc 1:1 ${rdaddr} /boot/initrd.img-${uname_r}; setenv rdsize ${filesize}\0" \
+	"loaduEnvtxt=load mmc 1:1 ${loadaddr} /boot/uEnv.txt ; env import -t ${loadaddr} ${filesize};\0" \
+	"loadall=run loaduEnvtxt; run loadximage;\0" \
+	"mmcboot=echo Booting from mmc ...; " \
+		"run loadall; " \
+		"run mmcargs; " \
+		"bootz ${loadaddr};\0" \
+
+/*	"loadall=run loaduEnvtxt; run loadximage; run loadxfdt;\0" \ */
+/* 		"bootz ${loadaddr} - ${fdtaddr};\0" \ */
+
+#define CONFIG_BOOTCOMMAND \
+	"mmc rescan 1;" \
+	"run mmcboot;" \
 
 /* SH Ether */
 #define CONFIG_NET_MULTI
