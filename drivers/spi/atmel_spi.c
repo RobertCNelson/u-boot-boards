@@ -394,8 +394,8 @@ out:
 		 * Wait until the transfer is completely done before
 		 * we deactivate CS.
 		 */
-		wait_for_bit(__func__, &reg_base->sr,
-			     ATMEL_SPI_SR_TXEMPTY, true, 1000, false);
+		wait_for_bit_le32(&reg_base->sr,
+				  ATMEL_SPI_SR_TXEMPTY, true, 1000, false);
 
 		atmel_spi_cs_deactivate(dev);
 	}
@@ -474,7 +474,7 @@ static int atmel_spi_probe(struct udevice *bus)
 	ret = gpio_request_list_by_name(bus, "cs-gpios", priv->cs_gpios,
 					ARRAY_SIZE(priv->cs_gpios), 0);
 	if (ret < 0) {
-		error("Can't get %s gpios! Error: %d", bus->name, ret);
+		pr_err("Can't get %s gpios! Error: %d", bus->name, ret);
 		return ret;
 	}
 

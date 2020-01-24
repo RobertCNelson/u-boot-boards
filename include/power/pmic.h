@@ -11,6 +11,7 @@
 #ifndef __CORE_PMIC_H_
 #define __CORE_PMIC_H_
 
+#include <dm/ofnode.h>
 #include <i2c.h>
 #include <linux/list.h>
 #include <power/power_chrg.h>
@@ -164,6 +165,7 @@ struct dm_pmic_ops {
 	int (*read)(struct udevice *dev, uint reg, uint8_t *buffer, int len);
 	int (*write)(struct udevice *dev, uint reg, const uint8_t *buffer,
 		     int len);
+	int (*shutdown)(struct udevice *dev);
 };
 
 /**
@@ -296,6 +298,14 @@ int pmic_reg_write(struct udevice *dev, uint reg, uint value);
  * @return 0 on success or negative value of errno.
  */
 int pmic_clrsetbits(struct udevice *dev, uint reg, uint clr, uint set);
+
+/**
+ * pmic_shutdown() - power off supplies of PMIC
+ *
+ * @dev:	PMIC device to update
+ * @return 0 on success or negative value of errno.
+ */
+int pmic_shutdown(struct udevice *dev);
 
 #endif /* CONFIG_DM_PMIC */
 

@@ -10,14 +10,15 @@ ifdef CONFIG_DM_SPI
 obj-y += spi-uclass.o
 obj-$(CONFIG_SANDBOX) += spi-emul-uclass.o
 obj-$(CONFIG_SOFT_SPI) += soft_spi.o
+obj-$(CONFIG_SPI_MEM) += spi-mem.o
 else
 obj-y += spi.o
+obj-$(CONFIG_SPI_MEM) += spi-mem-nodm.o
 obj-$(CONFIG_SOFT_SPI) += soft_spi_legacy.o
 endif
 
 obj-$(CONFIG_ALTERA_SPI) += altera_spi.o
 obj-$(CONFIG_ATH79_SPI) += ath79_spi.o
-obj-$(CONFIG_ATMEL_DATAFLASH_SPI) += atmel_dataflash_spi.o
 obj-$(CONFIG_ATMEL_SPI) += atmel_spi.o
 obj-$(CONFIG_CADENCE_QSPI) += cadence_qspi.o cadence_qspi_apb.o
 obj-$(CONFIG_CF_SPI) += cf_spi.o
@@ -38,6 +39,7 @@ obj-$(CONFIG_MXS_SPI) += mxs_spi.o
 obj-$(CONFIG_OMAP3_SPI) += omap3_spi.o
 obj-$(CONFIG_PIC32_SPI) += pic32_spi.o
 obj-$(CONFIG_ROCKCHIP_SPI) += rk_spi.o
+obj-$(CONFIG_ROCKCHIP_SFC) += rockchip_sfc.o
 obj-$(CONFIG_SANDBOX_SPI) += sandbox_spi.o
 obj-$(CONFIG_SH_SPI) += sh_spi.o
 obj-$(CONFIG_SH_QSPI) += sh_qspi.o

@@ -61,9 +61,9 @@ struct clk {
 };
 
 #if CONFIG_IS_ENABLED(OF_CONTROL) && CONFIG_IS_ENABLED(CLK)
-struct phandle_2_cell;
+struct phandle_1_arg;
 int clk_get_by_index_platdata(struct udevice *dev, int index,
-			      struct phandle_2_cell *cells, struct clk *clk);
+			      struct phandle_1_arg *cells, struct clk *clk);
 
 /**
  * clock_get_by_index - Get/request a clock by integer index.
@@ -133,6 +133,23 @@ static inline int clk_release_all(struct clk *clk, int count)
 
 #endif
 
+#if (CONFIG_IS_ENABLED(OF_CONTROL) && !CONFIG_IS_ENABLED(OF_PLATDATA)) && \
+	CONFIG_IS_ENABLED(CLK)
+/**
+ * clk_set_defaults - Process 'assigned-{clocks/clock-parents/clock-rates}'
+ *                    properties to configure clocks
+ *
+ * @dev:        A device to process (the ofnode associated with this device
+ *              will be processed).
+ */
+int clk_set_defaults(struct udevice *dev);
+#else
+static inline int clk_set_defaults(struct udevice *dev)
+{
+	return 0;
+}
+#endif
+
 /**
  * clk_request - Request a clock by provider-specific ID.
  *
@@ -178,6 +195,37 @@ ulong clk_get_rate(struct clk *clk);
 ulong clk_set_rate(struct clk *clk, ulong rate);
 
 /**
+ * clk_get_phase() - Get the phase shift of a clock signal.
+ *
+ * @clk:	A clock struct that was previously successfully requested by
+ *		clk_request/get_by_*().
+ * @return the phase shift of a clock node in degrees, otherwise returns
+ *		-ve error code.
+ */
+int clk_get_phase(struct clk *clk);
+
+/**
+ * clk_set_rate() - Adjust the phase shift of a clock signal.
+ *
+ * @clk:	A clock struct that was previously successfully requested by
+ *		clk_request/get_by_*().
+ * @degrees:	Numberof degrees the signal is shifted.
+ * @return 0 on success, or -ve error code.
+ */
+int clk_set_phase(struct clk *clk, int degrees);
+
+/**
+ * clk_set_parent() - Set current clock parent.
+ *
+ * @clk:	A clock struct that was previously successfully requested by
+ *		clk_request/get_by_*().
+ * @parent:	A clock struct that was previously successfully requested by
+ *		clk_request/get_by_*().
+ * @return new rate, or -ve error code.
+ */
+int clk_set_parent(struct clk *clk, struct clk *parent);
+
+/**
  * clk_enable() - Enable (turn on) a clock.
  *
  * @clk:	A clock struct that was previously successfully requested by
@@ -196,5 +244,7 @@ int clk_enable(struct clk *clk);
 int clk_disable(struct clk *clk);
 
 int soc_clk_dump(void);
+
+int clks_probe(void);
 
 #endif

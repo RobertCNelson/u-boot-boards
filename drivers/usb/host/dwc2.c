@@ -108,8 +108,8 @@ static void dwc_otg_flush_tx_fifo(struct dwc2_core_regs *regs, const int num)
 
 	writel(DWC2_GRSTCTL_TXFFLSH | (num << DWC2_GRSTCTL_TXFNUM_OFFSET),
 	       &regs->grstctl);
-	ret = wait_for_bit(__func__, &regs->grstctl, DWC2_GRSTCTL_TXFFLSH,
-			   false, 1000, false);
+	ret = wait_for_bit_le32(&regs->grstctl, DWC2_GRSTCTL_TXFFLSH,
+				false, 1000, false);
 	if (ret)
 		printf("%s: Timeout!\n", __func__);
 
@@ -127,8 +127,8 @@ static void dwc_otg_flush_rx_fifo(struct dwc2_core_regs *regs)
 	int ret;
 
 	writel(DWC2_GRSTCTL_RXFFLSH, &regs->grstctl);
-	ret = wait_for_bit(__func__, &regs->grstctl, DWC2_GRSTCTL_RXFFLSH,
-			   false, 1000, false);
+	ret = wait_for_bit_le32(&regs->grstctl, DWC2_GRSTCTL_RXFFLSH,
+				false, 1000, false);
 	if (ret)
 		printf("%s: Timeout!\n", __func__);
 
@@ -145,15 +145,15 @@ static void dwc_otg_core_reset(struct dwc2_core_regs *regs)
 	int ret;
 
 	/* Wait for AHB master IDLE state. */
-	ret = wait_for_bit(__func__, &regs->grstctl, DWC2_GRSTCTL_AHBIDLE,
-			   true, 1000, false);
+	ret = wait_for_bit_le32(&regs->grstctl, DWC2_GRSTCTL_AHBIDLE,
+				true, 1000, false);
 	if (ret)
 		printf("%s: Timeout!\n", __func__);
 
 	/* Core Soft Reset */
 	writel(DWC2_GRSTCTL_CSFTRST, &regs->grstctl);
-	ret = wait_for_bit(__func__, &regs->grstctl, DWC2_GRSTCTL_CSFTRST,
-			   false, 1000, false);
+	ret = wait_for_bit_le32(&regs->grstctl, DWC2_GRSTCTL_CSFTRST,
+				false, 1000, false);
 	if (ret)
 		printf("%s: Timeout!\n", __func__);
 
@@ -179,7 +179,7 @@ static int dwc_vbus_supply_init(struct udevice *dev)
 
 	ret = regulator_set_enable(vbus_supply, true);
 	if (ret) {
-		error("Error enabling vbus supply\n");
+		pr_err("Error enabling vbus supply\n");
 		return ret;
 	}
 
@@ -267,8 +267,8 @@ static void dwc_otg_core_host_init(struct udevice *dev,
 		clrsetbits_le32(&regs->hc_regs[i].hcchar,
 				DWC2_HCCHAR_EPDIR,
 				DWC2_HCCHAR_CHEN | DWC2_HCCHAR_CHDIS);
-		ret = wait_for_bit(__func__, &regs->hc_regs[i].hcchar,
-				   DWC2_HCCHAR_CHEN, false, 1000, false);
+		ret = wait_for_bit_le32(&regs->hc_regs[i].hcchar,
+					DWC2_HCCHAR_CHEN, false, 1000, false);
 		if (ret)
 			printf("%s: Timeout!\n", __func__);
 	}
@@ -783,8 +783,8 @@ int wait_for_chhltd(struct dwc2_hc_regs *hc_regs, uint32_t *sub, u8 *toggle)
 	int ret;
 	uint32_t hcint, hctsiz;
 
-	ret = wait_for_bit(__func__, &hc_regs->hcint, DWC2_HCINT_CHHLTD, true,
-			   1000, false);
+	ret = wait_for_bit_le32(&hc_regs->hcint, DWC2_HCINT_CHHLTD, true,
+				1000, false);
 	if (ret)
 		return ret;
 
@@ -1245,7 +1245,7 @@ static int dwc2_usb_ofdata_to_platdata(struct udevice *dev)
 	struct dwc2_priv *priv = dev_get_priv(dev);
 	fdt_addr_t addr;
 
-	addr = devfdt_get_addr(dev);
+	addr = dev_read_addr(dev);
 	if (addr == FDT_ADDR_T_NONE)
 		return -EINVAL;
 	priv->regs = (struct dwc2_core_regs *)addr;
@@ -1262,6 +1262,10 @@ static int dwc2_usb_probe(struct udevice *dev)
 	struct usb_bus_priv *bus_priv = dev_get_uclass_priv(dev);
 
 	bus_priv->desc_before_addr = true;
+
+#ifdef CONFIG_ARCH_ROCKCHIP
+	priv->hnp_srp_disable = true;
+#endif
 
 	return dwc2_init_common(dev, priv);
 }

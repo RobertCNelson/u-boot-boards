@@ -77,9 +77,7 @@
 
 #ifdef CONFIG_NAND_ARASAN
 # define CONFIG_SYS_MAX_NAND_DEVICE	1
-# define CONFIG_SYS_NAND_SELF_INIT
 # define CONFIG_SYS_NAND_ONFI_DETECTION
-# define CONFIG_MTD_DEVICE
 #endif
 
 /* Miscellaneous configurable options */
@@ -103,7 +101,6 @@
 		DFU_ALT_INFO_RAM
 
 #ifndef CONFIG_SPL_BUILD
-# define CONFIG_RANDOM_UUID
 # define PARTS_DEFAULT \
 	"partitions=uuid_disk=${uuid_gpt_disk};" \
 	"name=""boot"",size=16M,uuid=${uuid_gpt_boot};" \
